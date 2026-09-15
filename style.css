@@ -1,0 +1,258 @@
+:root {
+  --bg: #f6f7f5;
+  --panel: #ffffff;
+  --ink: #1f2a24;
+  --muted: #5c6b63;
+  --line: #dfe5e0;
+  --ok: #1e7a4c;
+  --ok-bg: #e6f4ec;
+  --bad: #a3311f;
+  --bad-bg: #fbeae7;
+  --warn: #8a6d1f;
+  --warn-bg: #faf3df;
+  --accent: #2f5d4f;
+  --accent-hover: #24493e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  padding: 24px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.sub {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 20px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 18px;
+}
+
+.tab {
+  padding: 9px 16px;
+  font-size: 13.5px;
+  cursor: pointer;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  user-select: none;
+}
+
+.tab.active {
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--line);
+  font-weight: 600;
+}
+
+.panel {
+  display: none;
+}
+
+.panel.active {
+  display: block;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+
+.card h2 {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+
+.card p.desc {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+.drop {
+  display: block;
+  border: 1.5px dashed var(--line);
+  border-radius: 8px;
+  padding: 22px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13.5px;
+  cursor: pointer;
+  background: #fafbfa;
+  transition: all 0.2s ease;
+}
+
+.drop:hover, .drop.dragover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #f0f5f2;
+}
+
+.drop input {
+  display: none;
+}
+
+.filename {
+  font-size: 12.5px;
+  color: var(--accent);
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+.summary {
+  display: flex;
+  gap: 10px;
+  margin: 14px 0 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.pill {
+  font-size: 12.5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.pill.ok { background: var(--ok-bg); color: var(--ok); }
+.pill.bad { background: var(--bad-bg); color: var(--bad); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.total { background: #eef1f0; color: var(--ink); }
+
+.controls-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.filters {
+  display: flex;
+  gap: 8px;
+}
+
+.filters button {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  cursor: pointer;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+
+.filters button:hover {
+  border-color: var(--accent);
+}
+
+.filters button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+  background: #f0f5f2;
+}
+
+.btn-export {
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.15s ease;
+}
+
+.btn-export:hover {
+  background: var(--accent-hover);
+}
+
+.search-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  outline: none;
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+}
+
+.tablewrap {
+  max-height: 480px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+th, td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+}
+
+tr.status-ok td.status { color: var(--ok); font-weight: 600; }
+tr.status-bad td.status { color: var(--bad); font-weight: 600; }
+tr.status-warn td.status { color: var(--warn); font-weight: 600; }
+
+.note {
+  font-size: 12px;
+  color: var(--muted);
+  background: #f2f4f2;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+.empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 20px 0;
+  text-align: center;
+}

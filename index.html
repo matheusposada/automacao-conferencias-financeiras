@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conferência Automática de Planilhas</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Lib xlsx -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+  <h1>Conferência Automática de Planilhas</h1>
+  <p class="sub">Carregue as planilhas base uma única vez e selecione as conferências abaixo.</p>
+
+  <!-- SEÇÃO CENTRAL DE UPLOAD -->
+  <div class="card" style="border-left: 4px solid var(--accent); background: #ffffff;">
+    <h2 style="margin-bottom: 12px; font-size: 16px;">📁 1. Carregar Arquivos Base</h2>
+    <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+      
+      <!-- Upload App -->
+      <div style="flex: 1; min-width: 220px;">
+        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">1. Planilha do App (Pedidos / Fin.):</label>
+        <label class="drop">
+          <input type="file" id="file-base-app" accept=".xlsx,.xls,.csv">
+          <span>Clique ou arraste o arquivo do App aqui</span>
+        </label>
+      </div>
+
+      <!-- Upload Vendas -->
+      <div style="flex: 1; min-width: 220px;">
+        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">2. Planilha de Vendas:</label>
+        <label class="drop">
+          <input type="file" id="file-base-vendas" accept=".xlsx,.xls,.csv">
+          <span>Clique ou arraste o arquivo de Vendas aqui</span>
+        </label>
+      </div>
+
+      <!-- Upload Safra -->
+      <div style="flex: 1; min-width: 220px;">
+        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">3. Extrato Safra (.csv):</label>
+        <label class="drop">
+          <input type="file" id="file-base-safra" accept=".csv,.xlsx,.xls">
+          <span>Clique ou arraste o extrato Safra aqui</span>
+        </label>
+      </div>
+
+      <!-- Upload Pix -->
+      <div style="flex: 1; min-width: 220px;">
+        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">4. Extrato Pix (.xlsx):</label>
+        <label class="drop">
+          <input type="file" id="file-base-pix" accept=".xlsx,.xls,.csv">
+          <span>Clique ou arraste a planilha Pix aqui</span>
+        </label>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SEÇÃO DE ANÁLISES -->
+  <h2 style="margin: 24px 0 12px; font-size: 16px;">🔍 2. Selecionar Análise</h2>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="duplicidade">1 · Duplicidades NSU (App)</div>
+    <div class="tab" data-tab="consultores">2 · Consultores (App × Vendas)</div>
+    <div class="tab" data-tab="datas">3 · Pedidos / Datas (App × Vendas)</div>
+    <div class="tab" data-tab="valores">4 · Valores (App × Vendas)</div>
+    <div class="tab" data-tab="pagamentos">5 · Pagamentos (App × Safra/Pix)</div>
+    <div class="tab" data-tab="datapagto">6 · Data Pagamento (App × Safra/Pix)</div>
+    <div class="tab" data-tab="confirmacao">7 · Confirmação Pgto (Extratos → App)</div>
+    <div class="tab" data-tab="duplicidadevendas">8 · Duplicidades Pedidos (Vendas)</div>
+  </div>
+
+  <!-- TAB 1: DUPLICIDADES NSU -->
+  <div class="panel active" id="panel-duplicidade">
+    <div class="card">
+      <h2>Conferir Duplicidades de NSU no App</h2>
+      <p class="desc">Usa o arquivo do <b>App</b> para identificar NSUs repetidos associados a diferentes pedidos ou clientes.</p>
+      <button class="btn-export btn-executar" data-analise="duplicidade" style="width: 100%; padding: 10px;">▶ Rodar Análise de Duplicidades</button>
+    </div>
+    <div class="card" id="result-duplicidade" style="display:none;"></div>
+  </div>
+
+  <!-- TAB 2: CONSULTORES -->
+  <div class="panel" id="panel-consultores">
+    <div class="card">
+      <h2>Conferir Consultores (App × Vendas)</h2>
+      <p class="desc">Cruza os dados do <b>App</b> e de <b>Vendas</b> para validar se os consultores/vendedores do pedido coincidem.</p>
+      <button class="btn-export btn-executar" data-analise="consultores" style="width: 100%; padding: 10px;">▶ Rodar Comparação de Consultores</button>
+    </div>
+    <div class="card" id="result-consultores" style="display:none;"></div>
+  </div>
+
+  <!-- TAB 3: DATAS -->
+  <div class="panel" id="panel-datas">
+    <div class="card">
+      <h2>Conferência Pedidos / Datas (App × Vendas)</h2>
+      <p class="desc">Compara a <b>Data da coluna A em Vendas</b> contra a <b>Data da coluna D/E em Pedidos (App)</b>.</p>
+      <button class="btn-export btn-executar" data-analise="datas" style="width: 100%; padding: 10px;">▶ Rodar Comparação de Datas</button>
+    </div>
+    <div class="card" id="result-datas" style="display:none;"></div>
+  </div>
+
+  <!-- TAB 4: VALORES -->
+  <div class="panel" id="panel-valores">
+    <div class="card">
+      <h2>Conferir Valores (App × Vendas)</h2>
+      <p class="desc">Cruza o valor total do pedido registrado em <b>Vendas</b> contra o valor registrado no <b>App</b>.</p>
+      <button class="btn-export btn-executar" data-analise="valores" style="width: 100%; padding: 10px;">▶ Rodar Comparação de Valores</button>
+    </div>
+    <div class="card" id="result-valores" style="display:none;"></div>
+  </div>
+
+  <!-- TAB 5: PAGAMENTOS -->
+  <div class="panel" id="panel-pagamentos">
+    <div class="card">
+      <h2>Conferir Pagamentos (App × Safra / Pix)</h2>
+      <p class="desc">Cruza o valor do <b>App</b> contra os pagamentos baixados no <b>Safra</b> e no <b>Pix</b> via NSU/Documento.</p>
+      <button class="btn-export btn-executar" data-analise="pagamentos" style="width: 100%; padding: 10px;">▶ Rodar Comparação de Pagamentos</button>
+    </div>
+    <div class="card" id="result-pagamentos" style="display:none;"></div>
+  </div>
+
+  <!-- TAB 6: DATA PAGAMENTO -->
+  <div class="panel" id="panel-datapagto">
+    <div class="card">
+      <h2>Conferir Data de Pagamento (App × Safra / Pix)</h2>
+      <p class="desc">Valida se a <b>Data de Pagamento do App (Coluna Z no Financeiro)</b> corresponde à data real de liquidação na coluna A do <b>Pix</b> e do <b>Safra</b>.</p>
+      <button class="btn-export btn-executar" data-analise="datapagto" style="width: 100%; padding: 10px;">▶ Rodar Comparação de Datas de Pagamento</button>
+    </div>
+    <div class="card" id="result-datapagto" style="display:none;"></div>
+  </div>
+
+  <!-- TAB 7: CONFIRMAÇÃO DE PAGAMENTO NOS EXTRATOS -->
+  <div class="panel" id="panel-confirmacao">
+    <div class="card">
+      <h2>Conferir Confirmação no App (Extratos Safra/Pix → App)</h2>
+      <p class="desc">Verifica se os pagamentos recebidos no <b>Safra e no Pix na data (Coluna A)</b> já estão com o status <b>Pgto Confirmado (Coluna I / Status Financeiro)</b> no App.</p>
+      
+      <!-- Filtro de Data -->
+      <div style="margin: 15px 0 20px; padding: 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;">
+        <label style="font-weight: 600; font-size: 13px; color: #495057; display: block; margin-bottom: 6px;">
+          📅 Filtrar pagamentos de um dia específico (Opcional):
+        </label>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <input type="date" id="filtro-data-confirmacao" style="padding: 8px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+          <button type="button" onclick="document.getElementById('filtro-data-confirmacao').value=''" style="padding: 8px 12px; background: #e2e8f0; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Limpar Data (Analisar Todos os Dias)</button>
+        </div>
+      </div>
+
+      <button class="btn-export btn-executar" data-analise="confirmacao" style="width: 100%; padding: 10px;">▶ Rodar Auditoria de Confirmação de Pagamento</button>
+    </div>
+    <div class="card" id="result-confirmacao" style="display:none;"></div>
+  </div>
+
+  <!-- TAB 8: DUPLICIDADES EM VENDAS -->
+  <div class="panel" id="panel-duplicidadevendas">
+    <div class="card">
+      <h2>Conferir Duplicidades de Pedidos (Vendas)</h2>
+      <p class="desc">Audita a planilha de <b>Vendas</b> para identificar se existem IDs de pedidos duplicados/repetidos.</p>
+      <button class="btn-export btn-executar" data-analise="duplicidadevendas" style="width: 100%; padding: 10px;">▶ Rodar Análise de Duplicidades em Vendas</button>
+    </div>
+    <div class="card" id="result-duplicidadevendas" style="display:none;"></div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
