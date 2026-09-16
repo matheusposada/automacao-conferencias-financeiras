@@ -6,6 +6,24 @@ const fileStore = {
   pix: null
 };
 
+// Higienização ultra-robusta de NSU com suporte a notação científica do Excel (ex: 2,76E+10 -> 27569591546)
+function cleanNSU(val) {
+  if (val === null || val === undefined || val === "") return "";
+  let str = String(val).trim().replace(",", ".");
+  
+  // Trata notação científica do Excel (ex: 2.7569591546e+10)
+  if (str.toLowerCase().includes("e+")) {
+    const num = Number(str);
+    if (!isNaN(num)) {
+      str = BigInt(Math.round(num)).toString();
+    }
+  } else {
+    str = str.split('.')[0];
+  }
+  
+  return str.replace(/\D/g, "").replace(/^0+/, "");
+}
+
 // Higieniza o número do pedido para remover prefixos (ex: "PED-2026-016077" -> "16077")
 function normPedido(v) {
   if (v === null || v === undefined) return "";
@@ -297,19 +315,36 @@ function renderResult(containerId, rows, columns, tabTitle = "Conferencia") {
 
   searchInput.addEventListener("input", draw);
 
+  // EXPORTAÇÃO NATIVA PARA FUNCIONAR SOMA NA BARRA DE STATUS DO EXCEL
   exportBtn.addEventListener("click", () => {
     const exportData = rows.map(r => {
       const obj = {};
       columns.forEach(c => {
         let val = r[c.key];
-        if (c.isCurrency && typeof val === "number") val = formatBRL(val);
-        obj[c.label] = val ?? "";
+        if (c.isCurrency && (typeof val === "number" || (!isNaN(parseFloat(val)) && isFinite(val)))) {
+          obj[c.label] = val !== null && val !== undefined ? Number(val) : "";
+        } else {
+          obj[c.label] = val ?? "";
+        }
       });
       obj["Status"] = r._statusLabel;
       return obj;
     });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
+
+    columns.forEach((c, colIdx) => {
+      if (c.isCurrency) {
+        const colLetter = XLSX.utils.encode_col(colIdx);
+        for (let rIdx = 2; rIdx <= rows.length + 1; rIdx++) {
+          const cellRef = `${colLetter}${rIdx}`;
+          if (ws[cellRef] && typeof ws[cellRef].v === "number") {
+            ws[cellRef].z = '"R$"#,##0.00;("R$"#,##0.00);"-"';
+          }
+        }
+      }
+    });
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Conferencia");
     XLSX.writeFile(wb, `${tabTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -409,7 +444,7 @@ async function rodarDuplicidades() {
 
     const nsus = rawNsu.split(/[,;\/]/).map(s => s.trim()).filter(Boolean);
     nsus.forEach(nsu => {
-      const cleanNsu = nsu.replace(/\D/g, "");
+      const cleanNsu = cleanNSU(nsu);
       const targetKey = cleanNsu || nsu;
 
       if (!nsuMap.has(targetKey)) nsuMap.set(targetKey, []);
@@ -671,7 +706,7 @@ async function rodarValores() {
   ], "Valores_App_x_Vendas");
 }
 
-// 5. PAGAMENTOS (App x Safra e Pix)
+// 5. PAGAMENTOS (App x Safra e Pix) - Exibição Individual por NSU com Validação por Grupo Cruzado e Tolerância de R$ 1,00
 async function rodarPagamentos() {
   const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
   const rowsSafra = fileStore.safra ? await parseFileToRows(fileStore.safra) : null;
@@ -682,31 +717,48 @@ async function rodarPagamentos() {
   const idxApp = findHeaderAndIndexes(rowsApp, {
     pedido: ["número", "nº pedido", "pedido", "id"],
     nsu: ["nsus confirmados", "nsu"],
-    valorTotal: ["valor total do pedido (r$)", "valor total a pagar", "valor (r$)"]
+    valorTotal: ["valor total do pedido (r$)", "valor total a pagar", "valor (r$)"],
+    statusFin: ["status financeiro", "status fin"]
   });
 
   const colPedApp = idxApp.indexes.pedido ?? 0;
   const colNsuApp = idxApp.indexes.nsu ?? 22;
   const colValApp = idxApp.indexes.valorTotal ?? 39;
+  const colStatusFinApp = idxApp.indexes.statusFin !== undefined && idxApp.indexes.statusFin !== -1 ? idxApp.indexes.statusFin : 2;
 
+  // 1. Mapeia pagamentos dos extratos (Safra e Pix) por NSU sem duplicar o mesmo lançamento
   const pagamentosMap = new Map();
+
+  function registrarPagamento(rawNsu, val) {
+    const cNsu = cleanNSU(rawNsu);
+    if (cNsu && val !== null) {
+      if (pagamentosMap.has(cNsu)) {
+        const valExistente = pagamentosMap.get(cNsu);
+        if (Math.abs(valExistente - val) > 0.01) {
+          pagamentosMap.set(cNsu, Math.max(valExistente, val));
+        }
+      } else {
+        pagamentosMap.set(cNsu, val);
+      }
+    }
+  }
 
   if (rowsSafra) {
     const idxSafra = findHeaderAndIndexes(rowsSafra, {
       nsu: ["nsu", "id da cobrança"],
-      valor: ["valor da transação", "valor total da cobrança", "valor"]
+      valor: ["valor da transação", "valor total da cobrança", "valor"],
+      statusCob: ["status da cobrança", "status"]
     });
     const colNsuSafra = idxSafra.indexes.nsu ?? 10;
     const colValSafra = idxSafra.indexes.valor ?? 16;
+    const colStatusSafra = idxSafra.indexes.statusCob !== undefined && idxSafra.indexes.statusCob !== -1 ? idxSafra.indexes.statusCob : 1;
 
     for (let i = idxSafra.headerRowIdx + 1; i < rowsSafra.length; i++) {
       const r = rowsSafra[i];
-      const rawNsu = normKey(r[colNsuSafra]).split('.')[0].trim();
-      const cleanNsu = rawNsu.replace(/\D/g, "");
-      const val = toNumber(r[colValSafra]);
-      if (cleanNsu && val !== null) {
-        pagamentosMap.set(cleanNsu, (pagamentosMap.get(cleanNsu) || 0) + val);
-      }
+      const statusCob = normKey(r[colStatusSafra]).toLowerCase();
+      if (statusCob && !statusCob.includes("autorizada")) continue;
+
+      registrarPagamento(r[colNsuSafra], toNumber(r[colValSafra]));
     }
   }
 
@@ -720,131 +772,198 @@ async function rodarPagamentos() {
 
     for (let i = idxPix.headerRowIdx + 1; i < rowsPix.length; i++) {
       const r = rowsPix[i];
-      const rawDoc = normKey(r[colDocPix]).split('.')[0].trim();
-      const cleanDoc = rawDoc.replace(/\D/g, "");
-      const val = toNumber(r[colValPix]);
-      if (cleanDoc && val !== null) {
-        pagamentosMap.set(cleanDoc, (pagamentosMap.get(cleanDoc) || 0) + val);
-      }
+      registrarPagamento(r[colDocPix], toNumber(r[colValPix]));
     }
   }
 
-  const appGrouped = new Map();
+  // 2. Consolida os Pedidos do App
+  const pedidosAppMap = new Map();
 
   for (let i = idxApp.headerRowIdx + 1; i < rowsApp.length; i++) {
     const r = rowsApp[i];
     const rawPed = normKey(r[colPedApp]);
     const cleanPed = normPedido(rawPed);
     const rawNsu = normKey(r[colNsuApp]);
-    const valTotal = toNumber(r[colValApp]);
+    const valTotalApp = toNumber(r[colValApp]) ?? 0;
+    const statusFin = normKey(r[colStatusFinApp]);
 
     if (!cleanPed) continue;
 
-    if (!appGrouped.has(cleanPed)) {
-      appGrouped.set(cleanPed, {
+    if (!pedidosAppMap.has(cleanPed)) {
+      pedidosAppMap.set(cleanPed, {
         rawPed: rawPed,
-        nsus: new Set(),
-        vApp: valTotal
+        valorApp: valTotalApp,
+        statusFin: statusFin,
+        nsus: new Set()
       });
     }
 
-    const group = appGrouped.get(cleanPed);
-    if (valTotal !== null && (group.vApp === null || group.vApp === 0)) {
-      group.vApp = valTotal;
+    const item = pedidosAppMap.get(cleanPed);
+    if (valTotalApp > 0 && (item.valorApp === 0 || item.valorApp === null)) {
+      item.valorApp = valTotalApp;
+    }
+    if (statusFin && !item.statusFin) {
+      item.statusFin = statusFin;
     }
 
     if (rawNsu && rawNsu !== "," && rawNsu !== ".") {
       const tokens = rawNsu.split(/[,;\/]/).map(s => s.trim()).filter(Boolean);
-      tokens.forEach(t => group.nsus.add(t));
+      tokens.forEach(t => item.nsus.add(t));
     }
   }
 
+  // 3. Agrupa e calcula as SOMAS TOTAIS de Pedidos e Extratos por Grupo de NSUs Interligados
+  const nsuGroupTotalsMap = new Map();
+
+  pedidosAppMap.forEach((item) => {
+    item.nsus.forEach(rawNsuInd => {
+      const cNsu = cleanNSU(rawNsuInd);
+      if (!cNsu || isExcecaoOK(rawNsuInd)) return;
+
+      let somaPedidosGrupo = 0;
+      let somaExtratosGrupo = 0;
+      const nsusVisitados = new Set();
+
+      pedidosAppMap.forEach((pSub) => {
+        const pNsusClean = Array.from(pSub.nsus).map(n => cleanNSU(n));
+        if (pNsusClean.includes(cNsu)) {
+          somaPedidosGrupo += pSub.valorApp;
+          pNsusClean.forEach(nClean => {
+            if (nClean && !nsusVisitados.has(nClean)) {
+              nsusVisitados.add(nClean);
+              somaExtratosGrupo += (pagamentosMap.get(nClean) ?? 0);
+            }
+          });
+        }
+      });
+
+      nsuGroupTotalsMap.set(cNsu, {
+        somaPedidos: somaPedidosGrupo,
+        somaExtratos: somaExtratosGrupo
+      });
+    });
+  });
+
+  // 4. Monta os resultados exibindo o valor individual de cada NSU
   const results = [];
 
-  appGrouped.forEach((group) => {
-    const nsusList = Array.from(group.nsus);
-    const vApp = group.vApp;
-
-    const possuiExcecao = nsusList.some(n => isExcecaoOK(n));
-    if (possuiExcecao) {
-      results.push({
-        pedido: group.rawPed,
-        nsu: nsusList.join(", "),
-        valorPagamento: vApp ?? 0,
-        valorApp: vApp ?? 0,
-        _status: "ok",
-        _statusLabel: "OK (Exceção: Bonificado / Boleto / Zero)"
-      });
-      return;
-    }
+  pedidosAppMap.forEach((item) => {
+    const nsusList = Array.from(item.nsus);
+    const valTotalApp = item.valorApp;
+    const statusFinAppStr = (item.statusFin || "").toLowerCase();
+    const isConfirmadoNoApp = statusFinAppStr.includes("confirmado") || statusFinAppStr.includes("pgto confirmado");
 
     if (nsusList.length === 0) {
       results.push({
-        pedido: group.rawPed,
+        pedido: item.rawPed,
         nsu: "(vazio)",
         valorPagamento: 0,
-        valorApp: vApp,
+        valorApp: valTotalApp,
         _status: "warn",
         _statusLabel: "Sem NSU no App"
       });
       return;
     }
 
-    let vPagamentoTotal = 0;
+    if (nsusList.some(n => isExcecaoOK(n))) {
+      results.push({
+        pedido: item.rawPed,
+        nsu: nsusList.join(" / "),
+        valorPagamento: valTotalApp ?? 0,
+        valorApp: valTotalApp,
+        _status: "ok",
+        _statusLabel: "OK (Exceção: Bonificado / Boleto / Zero)"
+      });
+      return;
+    }
+
+    let somaExtratosDoPedido = 0;
     let nsusEncontradosCount = 0;
 
-    nsusList.forEach(nsu => {
-      const cleanTarget = nsu.replace(/\D/g, "");
-      let valorEncontrado = null;
+    nsusList.forEach(rawNsuInd => {
+      const cTarget = cleanNSU(rawNsuInd);
+      let vEncontrado = pagamentosMap.get(cTarget) ?? null;
 
-      if (pagamentosMap.has(cleanTarget)) {
-        valorEncontrado = pagamentosMap.get(cleanTarget);
-      } else {
+      if (vEncontrado === null) {
         for (let [kExt, vExt] of pagamentosMap.entries()) {
-          if (kExt.endsWith(cleanTarget) || cleanTarget.endsWith(kExt)) {
-            valorEncontrado = vExt;
+          if (kExt.endsWith(cTarget) || cTarget.endsWith(kExt)) {
+            vEncontrado = vExt;
             break;
           }
         }
       }
 
-      if (valorEncontrado !== null) {
-        vPagamentoTotal += valorEncontrado;
+      if (vEncontrado !== null) {
+        somaExtratosDoPedido += vEncontrado;
         nsusEncontradosCount++;
       }
     });
 
-    let status = "ok";
-    let label = "OK";
+    nsusList.forEach(rawNsuInd => {
+      const cTarget = cleanNSU(rawNsuInd);
+      let valorIndividualExtrato = pagamentosMap.get(cTarget) ?? 0;
 
-    if (nsusEncontradosCount === 0) {
-      status = "warn";
-      label = "NSU não localizado (Safra/Pix)";
-    } else if (nsusEncontradosCount < nsusList.length) {
-      status = "warn";
-      label = `Pagamento Parcial (${nsusEncontradosCount}/${nsusList.length} NSUs)`;
-    } else if (vApp === null) {
-      status = "warn";
-      label = "Sem valor no App para comparar";
-    } else if (Math.abs(Math.round(vPagamentoTotal * 100) - Math.round(vApp * 100)) > 1) {
-      status = "bad";
-      label = "Valor Divergente";
-    }
+      // Validação 1: Soma dos extratos do pedido == Valor do Pedido (com tolerância de R$ 1,00)
+      const diffFracionada = Math.abs(Math.round(somaExtratosDoPedido * 100) - Math.round((valTotalApp ?? 0) * 100));
+      const bateuSomaFracionada = (nsusEncontradosCount === nsusList.length) && (diffFracionada <= 100);
 
-    results.push({
-      pedido: group.rawPed,
-      nsu: nsusList.join(", "),
-      valorPagamento: vPagamentoTotal,
-      valorApp: vApp,
-      _status: status,
-      _statusLabel: label
+      // Validação 2: Checa se a soma do grupo de pedidos/NSUs interligados bate (com tolerância de R$ 1,00)
+      const infoGrupo = nsuGroupTotalsMap.get(cTarget);
+      let bateuGrupo = false;
+      let diffGrupo = 999999;
+
+      if (infoGrupo) {
+        diffGrupo = Math.abs(Math.round(infoGrupo.somaExtratos * 100) - Math.round(infoGrupo.somaPedidos * 100));
+        bateuGrupo = (diffGrupo <= 100);
+      }
+
+      let status = "ok";
+      let label = "OK";
+
+      if (bateuSomaFracionada || bateuGrupo) {
+        status = "ok";
+        if (nsusList.length > 1 || bateuGrupo) {
+          label = "OK (Pagamento Fracionado/Misto)";
+        } else if (diffFracionada > 1 && diffFracionada <= 100) {
+          label = "OK (Diferença <= R$ 1,00)";
+        } else {
+          label = "OK";
+        }
+      } else if (valorIndividualExtrato === 0 && nsusEncontradosCount === 0) {
+        status = "warn";
+        label = "NSU não localizado (Safra/Pix)";
+      } else {
+        if (isConfirmadoNoApp) {
+          status = "bad";
+          label = "Valor Divergente";
+        } else {
+          status = "warn";
+          label = `Pendente no App (${item.statusFin || "Aguardando Conferência"})`;
+        }
+      }
+
+      results.push({
+        pedido: item.rawPed,
+        nsu: cTarget || rawNsuInd,
+        valorPagamento: valorIndividualExtrato,
+        valorApp: valTotalApp,
+        _status: status,
+        _statusLabel: label
+      });
     });
+  });
+
+  // ORDENAÇÃO DUPLA: Junta por Nº Pedido primeiro e depois por NSU
+  results.sort((a, b) => {
+    const compPed = String(a.pedido).localeCompare(String(b.pedido));
+    if (compPed !== 0) return compPed;
+    return String(a.nsu).localeCompare(String(b.nsu));
   });
 
   renderResult("result-pagamentos", results, [
     { key: "pedido", label: "Nº Pedido" },
     { key: "nsu", label: "NSU(s) Registrado(s)" },
-    { key: "valorPagamento", label: "Soma Encontrada (Safra+Pix)", isCurrency: true },
+    { key: "valorPagamento", label: "Valor Pago no Extrato (R$)", isCurrency: true },
     { key: "valorApp", label: "Valor Total (App)", isCurrency: true }
   ], "Pagamentos_App_x_Safra_Pix");
 }
@@ -872,15 +991,20 @@ async function rodarDataPagamento() {
   if (rowsSafra) {
     const idxSafra = findHeaderAndIndexes(rowsSafra, {
       data: ["data da cobrança", "data"],
-      nsu: ["nsu", "id da cobrança"]
+      nsu: ["nsu", "id da cobrança"],
+      statusCob: ["status da cobrança", "status"]
     });
     const colDataSafra = idxSafra.indexes.data !== undefined && idxSafra.indexes.data !== -1 ? idxSafra.indexes.data : 0;
     const colNsuSafra = idxSafra.indexes.nsu !== undefined && idxSafra.indexes.nsu !== -1 ? idxSafra.indexes.nsu : 10;
+    const colStatusSafra = idxSafra.indexes.statusCob !== undefined && idxSafra.indexes.statusCob !== -1 ? idxSafra.indexes.statusCob : 1;
 
     for (let i = idxSafra.headerRowIdx + 1; i < rowsSafra.length; i++) {
       const r = rowsSafra[i];
-      const rawNsu = normKey(r[colNsuSafra]).split('.')[0].trim();
-      const cleanNsu = rawNsu.replace(/\D/g, "");
+      const statusCob = normKey(r[colStatusSafra]).toLowerCase();
+      if (statusCob && !statusCob.includes("autorizada")) continue;
+
+      const rawNsu = normKey(r[colNsuSafra]);
+      const cleanNsu = cleanNSU(rawNsu);
       const jsDate = excelDateToJsDate(r[colDataSafra]);
 
       if (cleanNsu && jsDate) {
@@ -899,8 +1023,8 @@ async function rodarDataPagamento() {
 
     for (let i = idxPix.headerRowIdx + 1; i < rowsPix.length; i++) {
       const r = rowsPix[i];
-      const rawDoc = normKey(r[colDocPix]).split('.')[0].trim();
-      const cleanDoc = rawDoc.replace(/\D/g, "");
+      const rawDoc = normKey(r[colDocPix]);
+      const cleanDoc = cleanNSU(rawDoc);
       const jsDate = excelDateToJsDate(r[colDataPix]);
 
       if (cleanDoc && jsDate) {
@@ -948,7 +1072,7 @@ async function rodarDataPagamento() {
     let dExtratoEncontrada = null;
 
     for (const nsu of nsus) {
-      const cleanTarget = nsu.replace(/\D/g, "");
+      const cleanTarget = cleanNSU(nsu);
       if (extratosDataMap.has(cleanTarget)) {
         dExtratoEncontrada = extratosDataMap.get(cleanTarget);
         break;
@@ -995,7 +1119,7 @@ async function rodarDataPagamento() {
   ], "Data_Pagamento_App_x_Safra_Pix");
 }
 
-// 7. CONFIRMAÇÃO DE PAGAMENTO NOS EXTRATOS (Safra/Pix -> App) com Filtro por Dia e Consultor
+// 7. CONFIRMAÇÃO DE PAGAMENTO NOS EXTRATOS (Safra/Pix -> App)
 async function rodarConfirmacaoPagamento() {
   const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
   const rowsSafra = fileStore.safra ? await parseFileToRows(fileStore.safra) : null;
@@ -1035,39 +1159,62 @@ async function rodarConfirmacaoPagamento() {
 
     const nsus = rawNsu.split(/[,;\/]/).map(s => s.trim()).filter(Boolean);
     nsus.forEach(nsu => {
-      const cleanNsu = nsu.replace(/\D/g, "");
-      if (cleanNsu) {
-        appNsuStatusMap.set(cleanNsu, {
-          pedido: rawPed,
-          statusFin: statusFin,
-          consultor: consultor || "-",
-          rawNsu: nsu
-        });
+      let cleanNsuKey = cleanNSU(nsu);
+      if (cleanNsuKey) {
+        if (appNsuStatusMap.has(cleanNsuKey)) {
+          const existente = appNsuStatusMap.get(cleanNsuKey);
+          const stLowerExistente = existente.statusFin.toLowerCase();
+          const stLowerNovo = statusFin.toLowerCase();
+
+          if (!existente.pedido.includes(rawPed)) {
+            existente.pedido = `${existente.pedido} / ${rawPed}`;
+          }
+
+          if (!stLowerNovo.includes("confirmado") && stLowerExistente.includes("confirmado")) {
+            existente.statusFin = statusFin;
+          }
+        } else {
+          appNsuStatusMap.set(cleanNsuKey, {
+            pedido: rawPed,
+            statusFin: statusFin,
+            consultor: consultor || "-",
+            rawNsu: nsu
+          });
+        }
       }
     });
   }
 
   const results = [];
 
-  // 1. AUDITA EXTRATO SAFRA
   if (rowsSafra) {
     const idxSafra = findHeaderAndIndexes(rowsSafra, {
       data: ["data da cobrança", "data"],
       nsu: ["nsu", "id da cobrança"],
-      valor: ["valor da transação", "valor total da cobrança", "valor"]
+      valor: ["valor da transação", "valor total da cobrança", "valor"],
+      identificador: ["link", "url", "identificador", "id"],
+      statusCob: ["status da cobrança", "status"]
     });
+
     const colDataSafra = idxSafra.indexes.data ?? 0;
     const colNsuSafra = idxSafra.indexes.nsu ?? 10;
     const colValSafra = idxSafra.indexes.valor ?? 16;
+    const colIdentificadorSafra = idxSafra.indexes.identificador !== undefined && idxSafra.indexes.identificador !== -1 ? idxSafra.indexes.identificador : 7;
+    const colStatusSafra = idxSafra.indexes.statusCob !== undefined && idxSafra.indexes.statusCob !== -1 ? idxSafra.indexes.statusCob : 1;
 
     for (let i = idxSafra.headerRowIdx + 1; i < rowsSafra.length; i++) {
       const r = rowsSafra[i];
-      const rawNsu = normKey(r[colNsuSafra]).split('.')[0].trim();
-      const cleanNsu = rawNsu.replace(/\D/g, "");
+      const statusCob = normKey(r[colStatusSafra]).toLowerCase();
+      
+      if (statusCob && !statusCob.includes("autorizada")) continue;
+
+      const rawNsu = normKey(r[colNsuSafra]);
+      const cleanNsu = cleanNSU(rawNsu);
       const jsDate = excelDateToJsDate(r[colDataSafra]);
       const valor = toNumber(r[colValSafra]);
+      const identificadorColH = normKey(r[colIdentificadorSafra]) || "-";
 
-      if (!cleanNsu) continue;
+      if (!cleanNsu && !rawNsu) continue;
 
       if (dataFiltroJs && (!jsDate || !sameDay(dataFiltroJs, jsDate))) continue;
 
@@ -1075,7 +1222,8 @@ async function rodarConfirmacaoPagamento() {
         results.push({
           origem: "Safra",
           data: jsDate ? jsDate.toLocaleDateString("pt-BR") : "-",
-          nsu: rawNsu,
+          nsu: cleanNsu || rawNsu,
+          identificadorColH: identificadorColH,
           valor: valor,
           pedidoApp: "-",
           consultorApp: "-",
@@ -1116,7 +1264,8 @@ async function rodarConfirmacaoPagamento() {
       results.push({
         origem: "Safra",
         data: jsDate ? jsDate.toLocaleDateString("pt-BR") : "-",
-        nsu: rawNsu,
+        nsu: cleanNsu || rawNsu,
+        identificadorColH: identificadorColH,
         valor: valor,
         pedidoApp: appMatch ? appMatch.pedido : "-",
         consultorApp: appMatch ? appMatch.consultor : "-",
@@ -1127,25 +1276,28 @@ async function rodarConfirmacaoPagamento() {
     }
   }
 
-  // 2. AUDITA EXTRATO PIX
   if (rowsPix) {
     const idxPix = findHeaderAndIndexes(rowsPix, {
       data: ["data"],
       documento: ["documento", "nsu", "id"],
-      valor: ["valor"]
+      valor: ["valor"],
+      identificador: ["link", "url", "identificador"]
     });
+
     const colDataPix = idxPix.indexes.data ?? 0;
     const colDocPix = idxPix.indexes.documento ?? 2;
     const colValPix = idxPix.indexes.valor ?? 3;
+    const colIdentificadorPix = idxPix.indexes.identificador !== undefined && idxPix.indexes.identificador !== -1 ? idxPix.indexes.identificador : 7;
 
     for (let i = idxPix.headerRowIdx + 1; i < rowsPix.length; i++) {
       const r = rowsPix[i];
-      const rawDoc = normKey(r[colDocPix]).split('.')[0].trim();
-      const cleanDoc = rawDoc.replace(/\D/g, "");
+      const rawDoc = normKey(r[colDocPix]);
+      const cleanDoc = cleanNSU(rawDoc);
       const jsDate = excelDateToJsDate(r[colDataPix]);
       const valor = toNumber(r[colValPix]);
+      const identificadorColH = normKey(r[colIdentificadorPix]) || "-";
 
-      if (!cleanDoc) continue;
+      if (!cleanDoc && !rawDoc) continue;
 
       if (dataFiltroJs && (!jsDate || !sameDay(dataFiltroJs, jsDate))) continue;
 
@@ -1153,7 +1305,8 @@ async function rodarConfirmacaoPagamento() {
         results.push({
           origem: "Pix",
           data: jsDate ? jsDate.toLocaleDateString("pt-BR") : "-",
-          nsu: rawDoc,
+          nsu: cleanDoc || rawDoc,
+          identificadorColH: identificadorColH,
           valor: valor,
           pedidoApp: "-",
           consultorApp: "-",
@@ -1194,7 +1347,8 @@ async function rodarConfirmacaoPagamento() {
       results.push({
         origem: "Pix",
         data: jsDate ? jsDate.toLocaleDateString("pt-BR") : "-",
-        nsu: rawDoc,
+        nsu: cleanDoc || rawDoc,
+        identificadorColH: identificadorColH,
         valor: valor,
         pedidoApp: appMatch ? appMatch.pedido : "-",
         consultorApp: appMatch ? appMatch.consultor : "-",
@@ -1209,6 +1363,7 @@ async function rodarConfirmacaoPagamento() {
     { key: "origem", label: "Origem (Extrato)" },
     { key: "data", label: "Data Liquidação (Col A)" },
     { key: "nsu", label: "NSU / Documento" },
+    { key: "identificadorColH", label: "Identificador / Link (Col H)" },
     { key: "valor", label: "Valor Pago (R$)", isCurrency: true },
     { key: "pedidoApp", label: "Nº Pedido (App)" },
     { key: "consultorApp", label: "Consultor (App)" },
