@@ -19,7 +19,7 @@
     <div style="display: flex; gap: 16px; flex-wrap: wrap;">
       
       <!-- Upload App -->
-      <div style="flex: 1; min-width: 220px;">
+      <div style="flex: 1; min-width: 200px;">
         <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">1. Planilha do App (Pedidos / Fin.):</label>
         <label class="drop">
           <input type="file" id="file-base-app" accept=".xlsx,.xls,.csv">
@@ -28,7 +28,7 @@
       </div>
 
       <!-- Upload Vendas -->
-      <div style="flex: 1; min-width: 220px;">
+      <div style="flex: 1; min-width: 200px;">
         <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">2. Planilha de Vendas:</label>
         <label class="drop">
           <input type="file" id="file-base-vendas" accept=".xlsx,.xls,.csv">
@@ -37,7 +37,7 @@
       </div>
 
       <!-- Upload Safra -->
-      <div style="flex: 1; min-width: 220px;">
+      <div style="flex: 1; min-width: 200px;">
         <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">3. Extrato Safra (.csv):</label>
         <label class="drop">
           <input type="file" id="file-base-safra" accept=".csv,.xlsx,.xls">
@@ -46,11 +46,20 @@
       </div>
 
       <!-- Upload Pix -->
-      <div style="flex: 1; min-width: 220px;">
+      <div style="flex: 1; min-width: 200px;">
         <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">4. Extrato Pix (.xlsx):</label>
         <label class="drop">
           <input type="file" id="file-base-pix" accept=".xlsx,.xls,.csv">
           <span>Clique ou arraste a planilha Pix aqui</span>
+        </label>
+      </div>
+
+      <!-- Upload Santander -->
+      <div style="flex: 1; min-width: 200px;">
+        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">5. Extrato Santander (.xlsx):</label>
+        <label class="drop">
+          <input type="file" id="file-base-santander" accept=".xlsx,.xls,.csv">
+          <span>Clique ou arraste a planilha Santander aqui</span>
         </label>
       </div>
 
@@ -65,8 +74,8 @@
     <div class="tab" data-tab="consultores">2 · Consultores (App × Vendas)</div>
     <div class="tab" data-tab="datas">3 · Pedidos / Datas (App × Vendas)</div>
     <div class="tab" data-tab="valores">4 · Valores (App × Vendas)</div>
-    <div class="tab" data-tab="pagamentos">5 · Pagamentos (App × Safra/Pix)</div>
-    <div class="tab" data-tab="datapagto">6 · Data Pagamento (App × Safra/Pix)</div>
+    <div class="tab" data-tab="pagamentos">5 · Pagamentos (App × Extratos)</div>
+    <div class="tab" data-tab="datapagto">6 · Data Pagamento (App × Extratos)</div>
     <div class="tab" data-tab="confirmacao">7 · Confirmação Pgto (Extratos → App)</div>
     <div class="tab" data-tab="duplicidadevendas">8 · Duplicidades Pedidos (Vendas)</div>
   </div>
@@ -114,8 +123,8 @@
   <!-- TAB 5: PAGAMENTOS -->
   <div class="panel" id="panel-pagamentos">
     <div class="card">
-      <h2>Conferir Pagamentos (App × Safra / Pix)</h2>
-      <p class="desc">Cruza o valor do <b>App</b> contra os pagamentos baixados no <b>Safra</b> e no <b>Pix</b> via NSU/Documento.</p>
+      <h2>Conferir Pagamentos (App × Safra / Pix / Santander)</h2>
+      <p class="desc">Cruza o valor do <b>App</b> contra os pagamentos baixados no <b>Safra</b>, <b>Pix</b> e <b>Santander</b> via NSU/CV/Documento.</p>
       <button class="btn-export btn-executar" data-analise="pagamentos" style="width: 100%; padding: 10px;">▶ Rodar Comparação de Pagamentos</button>
     </div>
     <div class="card" id="result-pagamentos" style="display:none;"></div>
@@ -124,8 +133,8 @@
   <!-- TAB 6: DATA PAGAMENTO -->
   <div class="panel" id="panel-datapagto">
     <div class="card">
-      <h2>Conferir Data de Pagamento (App × Safra / Pix)</h2>
-      <p class="desc">Valida se a <b>Data de Pagamento do App (Coluna Z no Financeiro)</b> corresponde à data real de liquidação na coluna A do <b>Pix</b> e do <b>Safra</b>.</p>
+      <h2>Conferir Data de Pagamento (App × Safra / Pix / Santander)</h2>
+      <p class="desc">Valida se a <b>Data de Pagamento do App (Coluna Z no Financeiro)</b> corresponde à data real de liquidação na coluna A/D dos extratos.</p>
       <button class="btn-export btn-executar" data-analise="datapagto" style="width: 100%; padding: 10px;">▶ Rodar Comparação de Datas de Pagamento</button>
     </div>
     <div class="card" id="result-datapagto" style="display:none;"></div>
@@ -134,8 +143,8 @@
   <!-- TAB 7: CONFIRMAÇÃO DE PAGAMENTO NOS EXTRATOS -->
   <div class="panel" id="panel-confirmacao">
     <div class="card">
-      <h2>Conferir Confirmação no App (Extratos Safra/Pix → App)</h2>
-      <p class="desc">Verifica se os pagamentos recebidos no <b>Safra e no Pix na data (Coluna A)</b> já estão com o status <b>Pgto Confirmado (Coluna I / Status Financeiro)</b> no App.</p>
+      <h2>Conferir Confirmação no App (Extratos Safra/Pix/Santander → App)</h2>
+      <p class="desc">Verifica se os pagamentos recebidos no <b>Safra, Pix e Santander</b> já estão com o status <b>Pgto Confirmado (Coluna I / Status Financeiro)</b> no App.</p>
       
       <!-- Filtro de Data -->
       <div style="margin: 15px 0 20px; padding: 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;">
