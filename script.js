@@ -7,12 +7,115 @@ const fileStore = {
   santander: null
 };
 
-// Higienização ultra-robusta de NSU com suporte a notação científica do Excel (ex: 2,76E+10 -> 27569591546)
+// INSTÂNCIAS DOS CALENDÁRIOS FLATPICKR (PERÍODOS)
+let pickerConf = null;
+let pickerIndPrincipal = null;
+let pickerIndComp = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+  // Configuração padrão em Português para Flatpickr Range
+  const rangeConfig = {
+    mode: "range",
+    dateFormat: "d/m/Y",
+    locale: "pt",
+    allowInput: true
+  };
+
+  if (document.getElementById("filtro-periodo-confirmacao")) {
+    pickerConf = flatpickr("#filtro-periodo-confirmacao", rangeConfig);
+    document.getElementById("btn-limpar-periodo-conf")?.addEventListener("click", () => {
+      pickerConf.clear();
+    });
+  }
+
+  if (document.getElementById("ind-periodo-principal")) {
+    pickerIndPrincipal = flatpickr("#ind-periodo-principal", rangeConfig);
+    document.getElementById("btn-limpar-ind-principal")?.addEventListener("click", () => {
+      pickerIndPrincipal.clear();
+    });
+  }
+
+  if (document.getElementById("ind-periodo-comparativo")) {
+    pickerIndComp = flatpickr("#ind-periodo-comparativo", rangeConfig);
+    document.getElementById("btn-limpar-ind-comp")?.addEventListener("click", () => {
+      pickerIndComp.clear();
+    });
+  }
+});
+
+// FUNÇÃO UTILITÁRIA PARA LER O INTERVALO DO FLATPICKR
+function getFlatpickrRange(pickerInstance) {
+  if (!pickerInstance || !pickerInstance.selectedDates || pickerInstance.selectedDates.length === 0) {
+    return { ini: null, fim: null };
+  }
+  const dates = pickerInstance.selectedDates;
+  const ini = dates[0] ? new Date(dates[0]) : null;
+  const fim = dates[1] ? new Date(dates[1]) : (dates[0] ? new Date(dates[0]) : null);
+
+  if (ini) ini.setHours(0, 0, 0, 0);
+  if (fim) fim.setHours(23, 59, 59, 999);
+
+  return { ini, fim };
+}
+
+// FORMATADOR ESTRITO DE DATAS NO PADRÃO BR (DD/MM/YYYY)
+function formatToBRDate(v) {
+  if (!v && v !== 0) return null;
+
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return null;
+    const day = String(v.getDate()).padStart(2, '0');
+    const month = String(v.getMonth() + 1).padStart(2, '0');
+    const year = v.getFullYear();
+    return { str: `${day}/${month}/${year}`, dateObj: v };
+  }
+
+  if (typeof v === "number") {
+    const utcDays = Math.floor(v - 25569);
+    const utcValue = utcDays * 86400;
+    const dateInfo = new Date(utcValue * 1000);
+    const dateObj = new Date(dateInfo.getUTCFullYear(), dateInfo.getUTCMonth(), dateInfo.getUTCDate());
+    
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const year = dateObj.getFullYear();
+    return { str: `${day}/${month}/${year}`, dateObj };
+  }
+
+  if (typeof v === "string" && v.trim() !== "") {
+    const cleaned = v.trim();
+
+    const mBr = cleaned.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (mBr) {
+      const day = String(parseInt(mBr[1], 10)).padStart(2, '0');
+      const month = String(parseInt(mBr[2], 10)).padStart(2, '0');
+      const year = parseInt(mBr[3], 10);
+      const dateObj = new Date(year, parseInt(month, 10) - 1, parseInt(day, 10));
+      return { str: `${day}/${month}/${year}`, dateObj };
+    }
+
+    const mIso = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (mIso) {
+      const year = parseInt(mIso[1], 10);
+      const month = String(parseInt(mIso[2], 10)).padStart(2, '0');
+      const day = String(parseInt(mIso[3], 10)).padStart(2, '0');
+      const dateObj = new Date(year, parseInt(month, 10) - 1, parseInt(day, 10));
+      return { str: `${day}/${month}/${year}`, dateObj };
+    }
+  }
+
+  return null;
+}
+
+function excelDateToJsDate(v) {
+  const parsed = formatToBRDate(v);
+  return parsed ? parsed.dateObj : null;
+}
+
 function cleanNSU(val) {
   if (val === null || val === undefined || val === "") return "";
   let str = String(val).trim().replace(",", ".");
   
-  // Trata notação científica do Excel (ex: 2.7569591546e+10)
   if (str.toLowerCase().includes("e+")) {
     const num = Number(str);
     if (!isNaN(num)) {
@@ -25,7 +128,6 @@ function cleanNSU(val) {
   return str.replace(/\D/g, "").replace(/^0+/, "");
 }
 
-// Higieniza o número do pedido para remover prefixos (ex: "PED-2026-016077" -> "16077")
 function normPedido(v) {
   if (v === null || v === undefined) return "";
   let str = String(v).trim();
@@ -41,7 +143,45 @@ function normKey(v) {
   return String(v).trim();
 }
 
-// REGRA GERAL DE EXCEÇÃO PARA NSUs (Bonificado, Boleto ou Zeros)
+function sanitizeText(str) {
+  if (!str) return "";
+  return String(str)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x00-\x7F]/g, " ")
+    .trim();
+}
+
+function isStatusAprovado(statusStr) {
+  if (!statusStr || String(statusStr).trim() === "") return true;
+  
+  const st = sanitizeText(statusStr);
+  
+  if (
+    st.includes("nao") || 
+    st.includes("negad") || 
+    st.includes("recusad") || 
+    st.includes("cancelad") || 
+    st.includes("vencid") || 
+    st.includes("falha") ||
+    st.includes("estornad") ||
+    st.includes("devolvido")
+  ) {
+    return false;
+  }
+  
+  return (
+    st.includes("autoriz") || 
+    st.includes("aprovad") || 
+    st.includes("pago") || 
+    st.includes("liquidad") || 
+    st.includes("confirmad") ||
+    st.includes("sucesso") ||
+    st === "ok"
+  );
+}
+
 function isExcecaoOK(rawNsu) {
   if (!rawNsu) return false;
   const str = String(rawNsu).trim().toLowerCase();
@@ -57,13 +197,19 @@ function isExcecaoOK(rawNsu) {
 
 function toNumber(v) {
   if (v === null || v === undefined || v === "") return null;
-  if (typeof v === "number") return v;
-  const cleaned = String(v)
+  if (typeof v === "number") return isNaN(v) ? null : v;
+  
+  let cleaned = String(v)
     .replace(/R\$/g, "")
     .replace(/\s/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".")
     .trim();
+
+  if (cleaned.includes(",") && cleaned.includes(".")) {
+    cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+  } else if (cleaned.includes(",")) {
+    cleaned = cleaned.replace(",", ".");
+  }
+
   const n = parseFloat(cleaned);
   return isNaN(n) ? null : n;
 }
@@ -75,25 +221,33 @@ function formatBRL(val) {
   return num.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-function excelDateToJsDate(v) {
-  if (v instanceof Date) return v;
-  if (typeof v === "number") {
-    return new Date(Math.round((v - 25569) * 86400 * 1000));
-  }
-  if (typeof v === "string" && v.trim() !== "") {
-    const cleaned = v.trim();
-    const mBr = cleaned.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-    if (mBr) return new Date(+mBr[3], +mBr[2] - 1, +mBr[1]);
-    
-    const mIso = cleaned.match(/(\d{4})-(\d{2})-(\d{2})/);
-    if (mIso) return new Date(+mIso[1], +mIso[2] - 1, +mIso[3]);
-  }
-  return null;
-}
-
 function sameDay(a, b) {
   if (!a || !b) return false;
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// FUNÇÃO UNIFICADA PARA BUSCA DE PAGAMENTO POR NSU
+function buscarPagamentoPorNsu(rawNsuInd, pagamentosMap) {
+  if (!rawNsuInd) return { cTarget: "", valor: 0, encontrado: false };
+
+  const cTarget = cleanNSU(rawNsuInd).replace(/^0+/, "");
+  let valor = pagamentosMap.get(cTarget) ?? null;
+
+  if (valor === null) {
+    for (let [kExt, vExt] of pagamentosMap.entries()) {
+      const kExtClean = kExt.replace(/^0+/, "");
+      if (kExtClean === cTarget || kExtClean.endsWith(cTarget) || cTarget.endsWith(kExtClean)) {
+        valor = vExt;
+        break;
+      }
+    }
+  }
+
+  return { 
+    cTarget, 
+    valor: valor ?? 0, 
+    encontrado: valor !== null 
+  };
 }
 
 async function parseFileToRows(file, preferredSheetName = null) {
@@ -101,7 +255,13 @@ async function parseFileToRows(file, preferredSheetName = null) {
   const ext = file.name.split('.').pop().toLowerCase();
   
   if (ext === 'csv') {
-    const text = await file.text();
+    const buffer = await file.arrayBuffer();
+    let text = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+
+    if (text.includes('\uFFFD')) {
+      text = new TextDecoder('windows-1252').decode(buffer);
+    }
+
     const delimiter = text.includes(';') ? ';' : ',';
     const lines = text.split(/\r?\n/).filter(line => line.trim() !== "");
     return lines.map(line => line.split(delimiter).map(cell => cell.replace(/^"|"$/g, '').trim()));
@@ -317,7 +477,6 @@ function renderResult(containerId, rows, columns, tabTitle = "Conferencia") {
 
   searchInput.addEventListener("input", draw);
 
-  // EXPORTAÇÃO NATIVA PARA FUNCIONAR SOMA NA BARRA DE STATUS DO EXCEL
   exportBtn.addEventListener("click", () => {
     const exportData = rows.map(r => {
       const obj = {};
@@ -404,6 +563,16 @@ document.querySelectorAll(".btn-executar").forEach(btn => {
         if (!fileStore.vendas) return alert("Por favor, carregue a planilha de Vendas no topo.");
         await rodarDuplicidadesVendas();
         break;
+
+      case "indicadores":
+        if (!fileStore.app) return alert("Por favor, carregue a planilha do App no topo.");
+        await rodarAnaliseIndicadores();
+        break;
+
+      case "cancelamentos":
+        if (!fileStore.app || !fileStore.vendas) return alert("Por favor, carregue as planilhas do App e de Vendas no topo.");
+        await rodarCancelamentos();
+        break;
     }
   });
 });
@@ -437,9 +606,8 @@ async function rodarDuplicidades() {
     const cliente = normKey(r[idxCli]);
     const rawNsu = normKey(r[idxNsu]);
     
-    const rawDateVal = r[idxData];
-    const jsDate = excelDateToJsDate(rawDateVal);
-    const strDate = jsDate ? jsDate.toLocaleDateString("pt-BR") : "-";
+    const dtParsed = formatToBRDate(r[idxData]);
+    const strDate = dtParsed ? dtParsed.str : "-";
 
     if (!rawNsu || rawNsu === "," || rawNsu === ".") continue;
     if (isExcecaoOK(rawNsu)) continue;
@@ -461,16 +629,29 @@ async function rodarDuplicidades() {
 
   const results = [];
   nsuMap.forEach((occurrences) => {
-    const isDup = occurrences.length > 1;
+    const clientesUnicos = new Set(occurrences.map(o => sanitizeText(o.cliente)));
+    const isDup = occurrences.length > 1 && clientesUnicos.size > 1;
+
     occurrences.forEach(item => {
+      let status = "ok";
+      let statusLabel = "Único";
+
+      if (isDup) {
+        status = "bad";
+        statusLabel = `Duplicado (${occurrences.length}x - Clientes Distintos)`;
+      } else if (occurrences.length > 1) {
+        status = "ok";
+        statusLabel = `Único / Mesmo Cliente (${occurrences.length}x pedidos)`;
+      }
+
       results.push({
         nsu: item.nsuExibicao,
         pedido: item.pedido,
         cliente: item.cliente,
         data: item.data,
         qntRepeticoes: occurrences.length,
-        _status: isDup ? "bad" : "ok",
-        _statusLabel: isDup ? `Duplicado (${occurrences.length}x)` : "Único"
+        _status: status,
+        _statusLabel: statusLabel
       });
     });
   });
@@ -484,7 +665,7 @@ async function rodarDuplicidades() {
   ], "Duplicidades_NSU_App");
 }
 
-// 2. CONSULTORES (App x Vendas)
+// 2. CONSULTORES (App x Vendas) - EXCLUI VENDEDORES 'SAC'
 async function rodarConsultores() {
   const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
   const rowsVendas = await parseFileToRows(fileStore.vendas);
@@ -495,12 +676,12 @@ async function rodarConsultores() {
   });
 
   const idxVen = findHeaderAndIndexes(rowsVendas, {
-    pedido: ["id pedido", "nº pedido", "pedido"],
-    consultor: ["consultor", "vendedor"]
+    pedido: ["id pedido", "nº pedido", "pedido", "número do comprovante de vendas (cv)"],
+    consultor: ["consultor", "vendedor", "razão social"]
   });
 
   const colPedidoApp = idxApp.indexes.pedido ?? 0;
-  const colVendedorApp = idxApp.indexes.vendedor ?? 28;
+  const colVendedorApp = idxApp.indexes.vendedor ?? 11;
 
   const colPedidoVen = idxVen.indexes.pedido ?? 9;
   const colConsultorVen = idxVen.indexes.consultor ?? 3;
@@ -510,7 +691,13 @@ async function rodarConsultores() {
     const r = rowsApp[i];
     const rawPed = normKey(r[colPedidoApp]);
     const cleanPed = normPedido(rawPed);
-    if (cleanPed) appMap.set(cleanPed, normKey(r[colVendedorApp]));
+    const consultorApp = normKey(r[colVendedorApp]);
+
+    if (sanitizeText(consultorApp) === "sac" || sanitizeText(consultorApp).includes("sac")) {
+      continue;
+    }
+
+    if (cleanPed) appMap.set(cleanPed, consultorApp);
   }
 
   const results = [];
@@ -520,15 +707,15 @@ async function rodarConsultores() {
     const cleanPed = normPedido(rawPed);
     if (!cleanPed) continue;
 
-    const cVendas = normKey(r[colConsultorVen]);
     const cApp = appMap.get(cleanPed);
+    const cVendas = normKey(r[colConsultorVen]);
 
     let status = "ok";
     let label = "OK";
 
     if (cApp === undefined) {
       status = "warn";
-      label = "Pedido não encontrado no App";
+      label = "Pedido não encontrado no App (ou consultor é SAC)";
     } else if (cVendas.toLowerCase() !== cApp.toLowerCase()) {
       status = "bad";
       label = "Consultor Divergente";
@@ -566,12 +753,12 @@ async function rodarDatas() {
   });
 
   const idxVen = findHeaderAndIndexes(rowsVendas, {
-    pedido: ["id pedido", "nº pedido", "pedido"],
-    data: ["data"]
+    pedido: ["id pedido", "nº pedido", "pedido", "número do comprovante de vendas (cv)"],
+    data: ["data/hora da venda", "data"]
   });
 
   const colPedidoVendas = idxVen.indexes.pedido !== undefined && idxVen.indexes.pedido !== -1 ? idxVen.indexes.pedido : 9;
-  const colDataVendas = idxVen.indexes.data !== undefined && idxVen.indexes.data !== -1 ? idxVen.indexes.data : 0;
+  const colDataVendas = idxVen.indexes.data !== undefined && idxVen.indexes.data !== -1 ? idxVen.indexes.data : 3;
 
   const colPedidoApp = idxApp.indexes.pedido !== undefined && idxApp.indexes.pedido !== -1 ? idxApp.indexes.pedido : 0;
 
@@ -590,11 +777,11 @@ async function rodarDatas() {
     const cleanPed = normPedido(rawPed);
 
     if (cleanPed && !appMap.has(cleanPed)) {
-      const rawDateVal = r[colDataApp];
-      const jsDate = excelDateToJsDate(rawDateVal);
+      const dtParsed = formatToBRDate(r[colDataApp]);
       appMap.set(cleanPed, {
         rawPed: rawPed,
-        date: jsDate
+        date: dtParsed ? dtParsed.dateObj : null,
+        str: dtParsed ? dtParsed.str : "-"
       });
     }
   }
@@ -606,7 +793,9 @@ async function rodarDatas() {
     const cleanPed = normPedido(rawPed);
     if (!cleanPed) continue;
 
-    const dVendas = excelDateToJsDate(r[colDataVendas]);
+    const dtVenParsed = formatToBRDate(r[colDataVendas]);
+    const dVendas = dtVenParsed ? dtVenParsed.dateObj : null;
+    const strVendas = dtVenParsed ? dtVenParsed.str : "-";
     const appEntry = appMap.get(cleanPed);
 
     let status = "ok";
@@ -625,8 +814,8 @@ async function rodarDatas() {
 
     results.push({
       pedido: rawPed,
-      dataVendas: dVendas ? dVendas.toLocaleDateString("pt-BR") : "-",
-      dataApp: appEntry && appEntry.date ? appEntry.date.toLocaleDateString("pt-BR") : "-",
+      dataVendas: strVendas,
+      dataApp: appEntry ? appEntry.str : "-",
       _status: status,
       _statusLabel: label
     });
@@ -634,7 +823,7 @@ async function rodarDatas() {
 
   renderResult("result-datas", results, [
     { key: "pedido", label: "Nº Pedido" },
-    { key: "dataVendas", label: "Data (Vendas - Col A)" },
+    { key: "dataVendas", label: "Data (Vendas)" },
     { key: "dataApp", label: "Data Verificação (App)" }
   ], "Datas_App_x_Vendas");
 }
@@ -646,25 +835,37 @@ async function rodarValores() {
 
   const idxApp = findHeaderAndIndexes(rowsApp, {
     pedido: ["número", "nº pedido", "pedido"],
-    valor: ["valor total a pagar", "valor total do pedido (r$)", "valor"]
+    valor: ["valor total do pedido (r$)", "valor total a pagar", "valor"],
+    statusGeral: ["status"],
+    statusFin: ["status financeiro", "status fin"]
   });
 
   const idxVen = findHeaderAndIndexes(rowsVendas, {
-    pedido: ["id pedido", "nº pedido", "pedido"],
-    valor: ["valor", "valor líquido"]
+    pedido: ["id pedido", "nº pedido", "pedido", "número do comprovante de vendas (cv)"],
+    valor: ["valor liquido", "valor total da venda", "valor"]
   });
 
   const colPedApp = idxApp.indexes.pedido ?? 0;
-  const colValApp = idxApp.indexes.valor ?? 43;
+  const colValApp = idxApp.indexes.valor ?? 39;
+  const colStGeralApp = idxApp.indexes.statusGeral ?? 7;
+  const colStFinApp = idxApp.indexes.statusFin ?? 8;
 
   const colPedVen = idxVen.indexes.pedido ?? 9;
-  const colValVen = idxVen.indexes.valor ?? 8;
+  const colValVen = idxVen.indexes.valor ?? 12;
 
   const appMap = new Map();
   for (let i = idxApp.headerRowIdx + 1; i < rowsApp.length; i++) {
     const r = rowsApp[i];
     const rawPed = normKey(r[colPedApp]);
     const cleanPed = normPedido(rawPed);
+
+    const stGeral = sanitizeText(r[colStGeralApp]);
+    const stFin = sanitizeText(r[colStFinApp]);
+
+    if (stGeral.includes("cancelad") || stFin.includes("cancelad")) {
+      continue;
+    }
+
     if (cleanPed) appMap.set(cleanPed, toNumber(r[colValApp]));
   }
 
@@ -676,6 +877,11 @@ async function rodarValores() {
     if (!cleanPed) continue;
 
     const valVendas = toNumber(r[colValVen]);
+
+    if (valVendas === 0 || valVendas === null) {
+      continue;
+    }
+
     const valApp = appMap.get(cleanPed);
 
     let status = "ok";
@@ -683,10 +889,7 @@ async function rodarValores() {
 
     if (valApp === undefined) {
       status = "warn";
-      label = "Pedido não encontrado no App";
-    } else if (valVendas === null || valApp === null) {
-      status = "warn";
-      label = "Sem valor para comparar";
+      label = "Pedido não encontrado no App (ou Cancelado no App)";
     } else if (Math.round(valVendas * 100) !== Math.round(valApp * 100)) {
       status = "bad";
       label = "Valor Divergente";
@@ -708,7 +911,7 @@ async function rodarValores() {
   ], "Valores_App_x_Vendas");
 }
 
-// 5. PAGAMENTOS (App x Safra, Pix e Santander) - Exibição Individual por NSU com Validação por Grupo Cruzado e Tolerância de R$ 1,00
+// 5. PAGAMENTOS (App x Safra, Pix e Santander) - CORRIGIDO
 async function rodarPagamentos() {
   const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
   const rowsSafra = fileStore.safra ? await parseFileToRows(fileStore.safra) : null;
@@ -727,9 +930,8 @@ async function rodarPagamentos() {
   const colPedApp = idxApp.indexes.pedido ?? 0;
   const colNsuApp = idxApp.indexes.nsu ?? 22;
   const colValApp = idxApp.indexes.valorTotal ?? 39;
-  const colStatusFinApp = idxApp.indexes.statusFin !== undefined && idxApp.indexes.statusFin !== -1 ? idxApp.indexes.statusFin : 2;
+  const colStatusFinApp = idxApp.indexes.statusFin !== undefined && idxApp.indexes.statusFin !== -1 ? idxApp.indexes.statusFin : 8;
 
-  // 1. Mapeia pagamentos dos extratos (Safra, Pix e Santander) por NSU
   const pagamentosMap = new Map();
 
   function registrarPagamento(rawNsu, val) {
@@ -748,18 +950,22 @@ async function rodarPagamentos() {
 
   if (rowsSafra) {
     const idxSafra = findHeaderAndIndexes(rowsSafra, {
-      nsu: ["nsu", "id da cobrança"],
-      valor: ["valor da transação", "valor total da cobrança", "valor"],
-      statusCob: ["status da cobrança", "status"]
+      nsu: ["nsu", "id da cobrança", "comprovante"],
+      valor: ["valor da transação", "valor total da cobrança", "valor pago", "valor"],
+      statusCob: ["status da cobrança", "status", "situacao", "situação"]
     });
     const colNsuSafra = idxSafra.indexes.nsu ?? 10;
     const colValSafra = idxSafra.indexes.valor ?? 16;
-    const colStatusSafra = idxSafra.indexes.statusCob !== undefined && idxSafra.indexes.statusCob !== -1 ? idxSafra.indexes.statusCob : 1;
+    const colStatusDetectado = idxSafra.indexes.statusCob;
 
     for (let i = idxSafra.headerRowIdx + 1; i < rowsSafra.length; i++) {
       const r = rowsSafra[i];
-      const statusCob = normKey(r[colStatusSafra]).toLowerCase();
-      if (statusCob && !statusCob.includes("autorizada")) continue;
+      
+      const stDet = colStatusDetectado !== undefined && colStatusDetectado !== -1 ? normKey(r[colStatusDetectado]) : "";
+
+      if (stDet && !isStatusAprovado(stDet)) {
+        continue;
+      }
 
       registrarPagamento(r[colNsuSafra], toNumber(r[colValSafra]));
     }
@@ -786,23 +992,20 @@ async function rodarPagamentos() {
       statusCob: ["status da transação", "status"]
     });
 
-    const colNsuSantander = idxSantander.indexes.nsu !== undefined && idxSantander.indexes.nsu !== -1 ? idxSantander.indexes.nsu : 10; // Coluna K
-    const colValSantander = idxSantander.indexes.valor !== undefined && idxSantander.indexes.valor !== -1 ? idxSantander.indexes.valor : 12; // Coluna M
-    const colStatusSantander = idxSantander.indexes.statusCob !== undefined && idxSantander.indexes.statusCob !== -1 ? idxSantander.indexes.statusCob : 8; // Coluna I
+    const colNsuSantander = idxSantander.indexes.nsu !== undefined && idxSantander.indexes.nsu !== -1 ? idxSantander.indexes.nsu : 10;
+    const colValSantander = idxSantander.indexes.valor !== undefined && idxSantander.indexes.valor !== -1 ? idxSantander.indexes.valor : 12;
+    const colStatusSantander = idxSantander.indexes.statusCob !== undefined && idxSantander.indexes.statusCob !== -1 ? idxSantander.indexes.statusCob : 8;
 
     for (let i = idxSantander.headerRowIdx + 1; i < rowsSantander.length; i++) {
       const r = rowsSantander[i];
-      const statusCob = normKey(r[colStatusSantander]).toLowerCase();
+      const statusCob = normKey(r[colStatusSantander]);
       
-      if (statusCob && !statusCob.includes("aprovada") && !statusCob.includes("autorizada") && !statusCob.includes("pago") && !statusCob.includes("confirmado")) {
-        continue;
-      }
+      if (!isStatusAprovado(statusCob)) continue;
 
       registrarPagamento(r[colNsuSantander], toNumber(r[colValSantander]));
     }
   }
 
-  // 2. Consolida os Pedidos do App
   const pedidosAppMap = new Map();
 
   for (let i = idxApp.headerRowIdx + 1; i < rowsApp.length; i++) {
@@ -838,16 +1041,13 @@ async function rodarPagamentos() {
     }
   }
 
-// 3. Constrói Grupos Unificados por Teia de Interligação (Pedidos e NSUs interligados)
-  const nsuToGroupMap = new Map(); // cNsu -> GroupInfo
+  const nsuToGroupMap = new Map();
 
-  // Função auxiliar para expandir todo o grupo de pedidos e NSUs conectados
   pedidosAppMap.forEach((item, cleanPed) => {
     item.nsus.forEach(rawNsu => {
       const cNsu = cleanNSU(rawNsu);
       if (!cNsu || isExcecaoOK(rawNsu) || nsuToGroupMap.has(cNsu)) return;
 
-      // Descoberta do grupo (Breadth-First Search)
       const groupNsus = new Set();
       const groupPedidos = new Set();
       const queueNsu = [cNsu];
@@ -857,12 +1057,10 @@ async function rodarPagamentos() {
         if (groupNsus.has(currNsu)) continue;
         groupNsus.add(currNsu);
 
-        // Encontra todos os pedidos que usam este NSU
         pedidosAppMap.forEach((pSub, pKey) => {
           const pCleanNsus = Array.from(pSub.nsus).map(n => cleanNSU(n));
           if (pCleanNsus.includes(currNsu)) {
             groupPedidos.add(pKey);
-            // Adiciona todos os OUTROS NSUs desse pedido na fila para explorar
             pCleanNsus.forEach(otherNsu => {
               if (otherNsu && !groupNsus.has(otherNsu)) {
                 queueNsu.push(otherNsu);
@@ -872,7 +1070,6 @@ async function rodarPagamentos() {
         });
       }
 
-      // Calcula as somas totais do grupo descoberto
       let somaPedidosGrupo = 0;
       groupPedidos.forEach(pKey => {
         somaPedidosGrupo += (pedidosAppMap.get(pKey)?.valorApp ?? 0);
@@ -880,7 +1077,8 @@ async function rodarPagamentos() {
 
       let somaExtratosGrupo = 0;
       groupNsus.forEach(nClean => {
-        somaExtratosGrupo += (pagamentosMap.get(nClean) ?? 0);
+        const { valor } = buscarPagamentoPorNsu(nClean, pagamentosMap);
+        somaExtratosGrupo += valor;
       });
 
       const groupInfo = {
@@ -890,14 +1088,12 @@ async function rodarPagamentos() {
         qntNsus: groupNsus.size
       };
 
-      // Associa todos os NSUs do grupo a essa mesma info consolidada
       groupNsus.forEach(nClean => {
         nsuToGroupMap.set(nClean, groupInfo);
       });
     });
   });
 
-  // 4. Monta os resultados exibindo o valor individual de cada NSU
   const results = [];
 
   pedidosAppMap.forEach((item) => {
@@ -934,33 +1130,19 @@ async function rodarPagamentos() {
     let nsusEncontradosCount = 0;
 
     nsusList.forEach(rawNsuInd => {
-      const cTarget = cleanNSU(rawNsuInd);
-      let vEncontrado = pagamentosMap.get(cTarget) ?? null;
-
-      if (vEncontrado === null) {
-        for (let [kExt, vExt] of pagamentosMap.entries()) {
-          if (kExt.endsWith(cTarget) || cTarget.endsWith(kExt)) {
-            vEncontrado = vExt;
-            break;
-          }
-        }
-      }
-
-      if (vEncontrado !== null) {
-        somaExtratosDoPedido += vEncontrado;
+      const { valor, encontrado } = buscarPagamentoPorNsu(rawNsuInd, pagamentosMap);
+      if (encontrado) {
+        somaExtratosDoPedido += valor;
         nsusEncontradosCount++;
       }
     });
 
     nsusList.forEach(rawNsuInd => {
-      const cTarget = cleanNSU(rawNsuInd);
-      let valorIndividualExtrato = pagamentosMap.get(cTarget) ?? 0;
+      const { cTarget, valor: valorIndividualExtrato } = buscarPagamentoPorNsu(rawNsuInd, pagamentosMap);
 
-      // Validação 1: Soma dos extratos do pedido == Valor do Pedido (tolerância R$ 1,00)
       const diffFracionada = Math.abs(Math.round(somaExtratosDoPedido * 100) - Math.round((valTotalApp ?? 0) * 100));
       const bateuSomaFracionada = (nsusEncontradosCount === nsusList.length) && (diffFracionada <= 100);
 
-      // Validação 2: Checa se a soma da TEIA/GRUPO unificado de pedidos e NSUs bate (tolerância R$ 1,00)
       const infoGrupo = nsuToGroupMap.get(cTarget);
       let bateuGrupo = false;
 
@@ -1005,7 +1187,6 @@ async function rodarPagamentos() {
     });
   });
 
-  // ORDENAÇÃO DUPLA: Junta por Nº Pedido primeiro e depois por NSU
   results.sort((a, b) => {
     const compPed = String(a.pedido).localeCompare(String(b.pedido));
     if (compPed !== 0) return compPed;
@@ -1020,7 +1201,7 @@ async function rodarPagamentos() {
   ], "Pagamentos_App_x_Safra_Pix_Santander");
 }
 
-// 6. DATA DE PAGAMENTO (App Col Z x Safra/Pix Col A / Santander Col D)
+// 6. DATA DE PAGAMENTO
 async function rodarDataPagamento() {
   const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
   const rowsSafra = fileStore.safra ? await parseFileToRows(fileStore.safra) : null;
@@ -1044,24 +1225,28 @@ async function rodarDataPagamento() {
   if (rowsSafra) {
     const idxSafra = findHeaderAndIndexes(rowsSafra, {
       data: ["data da cobrança", "data"],
-      nsu: ["nsu", "id da cobrança"],
-      statusCob: ["status da cobrança", "status"]
+      nsu: ["nsu", "id da cobrança", "comprovante"],
+      statusCob: ["status da cobrança", "status", "situacao", "situação"]
     });
     const colDataSafra = idxSafra.indexes.data !== undefined && idxSafra.indexes.data !== -1 ? idxSafra.indexes.data : 0;
     const colNsuSafra = idxSafra.indexes.nsu !== undefined && idxSafra.indexes.nsu !== -1 ? idxSafra.indexes.nsu : 10;
-    const colStatusSafra = idxSafra.indexes.statusCob !== undefined && idxSafra.indexes.statusCob !== -1 ? idxSafra.indexes.statusCob : 1;
+    const colStatusDetectado = idxSafra.indexes.statusCob;
 
     for (let i = idxSafra.headerRowIdx + 1; i < rowsSafra.length; i++) {
       const r = rowsSafra[i];
-      const statusCob = normKey(r[colStatusSafra]).toLowerCase();
-      if (statusCob && !statusCob.includes("autorizada")) continue;
+      
+      const stDet = colStatusDetectado !== undefined && colStatusDetectado !== -1 ? normKey(r[colStatusDetectado]) : "";
+
+      if (stDet && !isStatusAprovado(stDet)) {
+        continue;
+      }
 
       const rawNsu = normKey(r[colNsuSafra]);
       const cleanNsu = cleanNSU(rawNsu);
-      const jsDate = excelDateToJsDate(r[colDataSafra]);
+      const dtParsed = formatToBRDate(r[colDataSafra]);
 
-      if (cleanNsu && jsDate) {
-        extratosDataMap.set(cleanNsu, jsDate);
+      if (cleanNsu && dtParsed) {
+        extratosDataMap.set(cleanNsu, dtParsed);
       }
     }
   }
@@ -1078,10 +1263,10 @@ async function rodarDataPagamento() {
       const r = rowsPix[i];
       const rawDoc = normKey(r[colDocPix]);
       const cleanDoc = cleanNSU(rawDoc);
-      const jsDate = excelDateToJsDate(r[colDataPix]);
+      const dtParsed = formatToBRDate(r[colDataPix]);
 
-      if (cleanDoc && jsDate) {
-        extratosDataMap.set(cleanDoc, jsDate);
+      if (cleanDoc && dtParsed) {
+        extratosDataMap.set(cleanDoc, dtParsed);
       }
     }
   }
@@ -1093,24 +1278,22 @@ async function rodarDataPagamento() {
       statusCob: ["status da transação", "status"]
     });
 
-    const colDataSantander = idxSantander.indexes.data !== undefined && idxSantander.indexes.data !== -1 ? idxSantander.indexes.data : 3; // Coluna D
-    const colNsuSantander = idxSantander.indexes.nsu !== undefined && idxSantander.indexes.nsu !== -1 ? idxSantander.indexes.nsu : 10; // Coluna K
-    const colStatusSantander = idxSantander.indexes.statusCob !== undefined && idxSantander.indexes.statusCob !== -1 ? idxSantander.indexes.statusCob : 8; // Coluna I
+    const colDataSantander = idxSantander.indexes.data !== undefined && idxSantander.indexes.data !== -1 ? idxSantander.indexes.data : 3;
+    const colNsuSantander = idxSantander.indexes.nsu !== undefined && idxSantander.indexes.nsu !== -1 ? idxSantander.indexes.nsu : 10;
+    const colStatusSantander = idxSantander.indexes.statusCob !== undefined && idxSantander.indexes.statusCob !== -1 ? idxSantander.indexes.statusCob : 8;
 
     for (let i = idxSantander.headerRowIdx + 1; i < rowsSantander.length; i++) {
       const r = rowsSantander[i];
-      const statusCob = normKey(r[colStatusSantander]).toLowerCase();
+      const statusCob = normKey(r[colStatusSantander]);
 
-      if (statusCob && !statusCob.includes("aprovada") && !statusCob.includes("autorizada") && !statusCob.includes("pago") && !statusCob.includes("confirmado")) {
-        continue;
-      }
+      if (!isStatusAprovado(statusCob)) continue;
 
       const rawNsu = normKey(r[colNsuSantander]);
       const cleanNsu = cleanNSU(rawNsu);
-      const jsDate = excelDateToJsDate(r[colDataSantander]);
+      const dtParsed = formatToBRDate(r[colDataSantander]);
 
-      if (cleanNsu && jsDate) {
-        extratosDataMap.set(cleanNsu, jsDate);
+      if (cleanNsu && dtParsed) {
+        extratosDataMap.set(cleanNsu, dtParsed);
       }
     }
   }
@@ -1122,7 +1305,9 @@ async function rodarDataPagamento() {
     const rawPed = normKey(r[colPedApp]);
     const cleanPed = normPedido(rawPed);
     const rawNsu = normKey(r[colNsuApp]);
-    const dApp = excelDateToJsDate(r[colDataPagtoApp]);
+    const dtAppParsed = formatToBRDate(r[colDataPagtoApp]);
+    const dApp = dtAppParsed ? dtAppParsed.dateObj : null;
+    const strApp = dtAppParsed ? dtAppParsed.str : "-";
 
     if (!cleanPed && !rawNsu) continue;
 
@@ -1131,7 +1316,7 @@ async function rodarDataPagamento() {
         pedido: rawPed,
         nsu: rawNsu,
         dataExtrato: "-",
-        dataApp: dApp ? dApp.toLocaleDateString("pt-BR") : "-",
+        dataApp: strApp,
         _status: "ok",
         _statusLabel: "OK (Exceção: Bonificado / Boleto / Zero)"
       });
@@ -1143,7 +1328,7 @@ async function rodarDataPagamento() {
         pedido: rawPed,
         nsu: "(vazio)",
         dataExtrato: "-",
-        dataApp: dApp ? dApp.toLocaleDateString("pt-BR") : "-",
+        dataApp: strApp,
         _status: "warn",
         _statusLabel: "Sem NSU no App"
       });
@@ -1151,34 +1336,34 @@ async function rodarDataPagamento() {
     }
 
     const nsus = rawNsu.split(/[,;\/]/).map(s => s.trim()).filter(Boolean);
-    let dExtratoEncontrada = null;
+    let dtExtratoEncontrada = null;
 
     for (const nsu of nsus) {
       const cleanTarget = cleanNSU(nsu);
       if (extratosDataMap.has(cleanTarget)) {
-        dExtratoEncontrada = extratosDataMap.get(cleanTarget);
+        dtExtratoEncontrada = extratosDataMap.get(cleanTarget);
         break;
       } else {
-        for (let [kExt, dVal] of extratosDataMap.entries()) {
+        for (let [kExt, dtObj] of extratosDataMap.entries()) {
           if (kExt.endsWith(cleanTarget) || cleanTarget.endsWith(kExt)) {
-            dExtratoEncontrada = dVal;
+            dtExtratoEncontrada = dtObj;
             break;
           }
         }
-        if (dExtratoEncontrada) break;
+        if (dtExtratoEncontrada) break;
       }
     }
 
     let status = "ok";
     let label = "OK";
 
-    if (!dExtratoEncontrada) {
+    if (!dtExtratoEncontrada) {
       status = "warn";
       label = "NSU não localizado nos extratos";
     } else if (!dApp) {
       status = "warn";
       label = "Sem data de pagamento no App";
-    } else if (!sameDay(dExtratoEncontrada, dApp)) {
+    } else if (!sameDay(dtExtratoEncontrada.dateObj, dApp)) {
       status = "bad";
       label = "Data Divergente";
     }
@@ -1186,8 +1371,8 @@ async function rodarDataPagamento() {
     results.push({
       pedido: rawPed,
       nsu: rawNsu,
-      dataExtrato: dExtratoEncontrada ? dExtratoEncontrada.toLocaleDateString("pt-BR") : "-",
-      dataApp: dApp ? dApp.toLocaleDateString("pt-BR") : "-",
+      dataExtrato: dtExtratoEncontrada ? dtExtratoEncontrada.str : "-",
+      dataApp: strApp,
       _status: status,
       _statusLabel: label
     });
@@ -1201,7 +1386,7 @@ async function rodarDataPagamento() {
   ], "Data_Pagamento_App_x_Extratos");
 }
 
-// 7. CONFIRMAÇÃO DE PAGAMENTO NOS EXTRATOS (Safra/Pix/Santander -> App)
+// 7. CONFIRMAÇÃO DE PAGAMENTO NOS EXTRATOS (Suporta filtro por Período Range)
 async function rodarConfirmacaoPagamento() {
   const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
   const rowsSafra = fileStore.safra ? await parseFileToRows(fileStore.safra) : null;
@@ -1210,12 +1395,7 @@ async function rodarConfirmacaoPagamento() {
 
   if (!rowsApp) return alert("Erro ao ler a planilha do App.");
 
-  const dataFiltroInput = document.getElementById("filtro-data-confirmacao") ? document.getElementById("filtro-data-confirmacao").value : "";
-  let dataFiltroJs = null;
-  if (dataFiltroInput) {
-    const parts = dataFiltroInput.split("-");
-    dataFiltroJs = new Date(+parts[0], +parts[1] - 1, +parts[2]);
-  }
+  const { ini: dtFiltroIni, fim: dtFiltroFim } = getFlatpickrRange(pickerConf);
 
   const idxApp = findHeaderAndIndexes(rowsApp, {
     pedido: ["nº pedido", "número", "pedido"],
@@ -1268,43 +1448,55 @@ async function rodarConfirmacaoPagamento() {
     });
   }
 
+  function inRange(jsDate) {
+    if (!dtFiltroIni && !dtFiltroFim) return true;
+    if (!jsDate) return false;
+    if (dtFiltroIni && jsDate < dtFiltroIni) return false;
+    if (dtFiltroFim && jsDate > dtFiltroFim) return false;
+    return true;
+  }
+
   const results = [];
 
   if (rowsSafra) {
     const idxSafra = findHeaderAndIndexes(rowsSafra, {
       data: ["data da cobrança", "data"],
-      nsu: ["nsu", "id da cobrança"],
-      valor: ["valor da transação", "valor total da cobrança", "valor"],
+      nsu: ["nsu", "id da cobrança", "comprovante"],
+      valor: ["valor da transação", "valor total da cobrança", "valor pago", "valor"],
       identificador: ["link", "url", "identificador", "id"],
-      statusCob: ["status da cobrança", "status"]
+      statusCob: ["status da cobrança", "status", "situacao", "situação"]
     });
 
     const colDataSafra = idxSafra.indexes.data ?? 0;
     const colNsuSafra = idxSafra.indexes.nsu ?? 10;
     const colValSafra = idxSafra.indexes.valor ?? 16;
     const colIdentificadorSafra = idxSafra.indexes.identificador !== undefined && idxSafra.indexes.identificador !== -1 ? idxSafra.indexes.identificador : 7;
-    const colStatusSafra = idxSafra.indexes.statusCob !== undefined && idxSafra.indexes.statusCob !== -1 ? idxSafra.indexes.statusCob : 1;
+    const colStatusDetectado = idxSafra.indexes.statusCob;
 
     for (let i = idxSafra.headerRowIdx + 1; i < rowsSafra.length; i++) {
       const r = rowsSafra[i];
-      const statusCob = normKey(r[colStatusSafra]).toLowerCase();
       
-      if (statusCob && !statusCob.includes("autorizada")) continue;
+      const stDet = colStatusDetectado !== undefined && colStatusDetectado !== -1 ? normKey(r[colStatusDetectado]) : "";
+
+      if (stDet && !isStatusAprovado(stDet)) {
+        continue;
+      }
 
       const rawNsu = normKey(r[colNsuSafra]);
       const cleanNsu = cleanNSU(rawNsu);
-      const jsDate = excelDateToJsDate(r[colDataSafra]);
+      const dtParsed = formatToBRDate(r[colDataSafra]);
+      const jsDate = dtParsed ? dtParsed.dateObj : null;
+      const strDate = dtParsed ? dtParsed.str : "-";
       const valor = toNumber(r[colValSafra]);
       const identificadorColH = normKey(r[colIdentificadorSafra]) || "-";
 
       if (!cleanNsu && !rawNsu) continue;
-
-      if (dataFiltroJs && (!jsDate || !sameDay(dataFiltroJs, jsDate))) continue;
+      if (!inRange(jsDate)) continue;
 
       if (isExcecaoOK(rawNsu)) {
         results.push({
           origem: "Safra",
-          data: jsDate ? jsDate.toLocaleDateString("pt-BR") : "-",
+          data: strDate,
           nsu: cleanNsu || rawNsu,
           identificadorColH: identificadorColH,
           valor: valor,
@@ -1346,7 +1538,7 @@ async function rodarConfirmacaoPagamento() {
 
       results.push({
         origem: "Safra",
-        data: jsDate ? jsDate.toLocaleDateString("pt-BR") : "-",
+        data: strDate,
         nsu: cleanNsu || rawNsu,
         identificadorColH: identificadorColH,
         valor: valor,
@@ -1376,18 +1568,19 @@ async function rodarConfirmacaoPagamento() {
       const r = rowsPix[i];
       const rawDoc = normKey(r[colDocPix]);
       const cleanDoc = cleanNSU(rawDoc);
-      const jsDate = excelDateToJsDate(r[colDataPix]);
+      const dtParsed = formatToBRDate(r[colDataPix]);
+      const jsDate = dtParsed ? dtParsed.dateObj : null;
+      const strDate = dtParsed ? dtParsed.str : "-";
       const valor = toNumber(r[colValPix]);
       const identificadorColH = normKey(r[colIdentificadorPix]) || "-";
 
       if (!cleanDoc && !rawDoc) continue;
-
-      if (dataFiltroJs && (!jsDate || !sameDay(dataFiltroJs, jsDate))) continue;
+      if (!inRange(jsDate)) continue;
 
       if (isExcecaoOK(rawDoc)) {
         results.push({
           origem: "Pix",
-          data: jsDate ? jsDate.toLocaleDateString("pt-BR") : "-",
+          data: strDate,
           nsu: cleanDoc || rawDoc,
           identificadorColH: identificadorColH,
           valor: valor,
@@ -1429,7 +1622,7 @@ async function rodarConfirmacaoPagamento() {
 
       results.push({
         origem: "Pix",
-        data: jsDate ? jsDate.toLocaleDateString("pt-BR") : "-",
+        data: strDate,
         nsu: cleanDoc || rawDoc,
         identificadorColH: identificadorColH,
         valor: valor,
@@ -1451,34 +1644,33 @@ async function rodarConfirmacaoPagamento() {
       statusCob: ["status da transação", "status"]
     });
 
-    const colDataSantander = idxSantander.indexes.data !== undefined && idxSantander.indexes.data !== -1 ? idxSantander.indexes.data : 3; // Coluna D
-    const colNsuSantander = idxSantander.indexes.nsu !== undefined && idxSantander.indexes.nsu !== -1 ? idxSantander.indexes.nsu : 10; // Coluna K
-    const colValSantander = idxSantander.indexes.valor !== undefined && idxSantander.indexes.valor !== -1 ? idxSantander.indexes.valor : 12; // Coluna M
-    const colIdentificadorSantander = idxSantander.indexes.identificador !== undefined && idxSantander.indexes.identificador !== -1 ? idxSantander.indexes.identificador : 9; // Coluna J (AUT)
-    const colStatusSantander = idxSantander.indexes.statusCob !== undefined && idxSantander.indexes.statusCob !== -1 ? idxSantander.indexes.statusCob : 8; // Coluna I
+    const colDataSantander = idxSantander.indexes.data !== undefined && idxSantander.indexes.data !== -1 ? idxSantander.indexes.data : 3;
+    const colNsuSantander = idxSantander.indexes.nsu !== undefined && idxSantander.indexes.nsu !== -1 ? idxSantander.indexes.nsu : 10;
+    const colValSantander = idxSantander.indexes.valor !== undefined && idxSantander.indexes.valor !== -1 ? idxSantander.indexes.valor : 12;
+    const colIdentificadorSantander = idxSantander.indexes.identificador !== undefined && idxSantander.indexes.identificador !== -1 ? idxSantander.indexes.identificador : 9;
+    const colStatusSantander = idxSantander.indexes.statusCob !== undefined && idxSantander.indexes.statusCob !== -1 ? idxSantander.indexes.statusCob : 8;
 
     for (let i = idxSantander.headerRowIdx + 1; i < rowsSantander.length; i++) {
       const r = rowsSantander[i];
-      const statusCob = normKey(r[colStatusSantander]).toLowerCase();
+      const statusCob = normKey(r[colStatusSantander]);
 
-      if (statusCob && !statusCob.includes("aprovada") && !statusCob.includes("autorizada") && !statusCob.includes("pago") && !statusCob.includes("confirmado")) {
-        continue;
-      }
+      if (!isStatusAprovado(statusCob)) continue;
 
       const rawNsu = normKey(r[colNsuSantander]);
       const cleanNsu = cleanNSU(rawNsu);
-      const jsDate = excelDateToJsDate(r[colDataSantander]);
+      const dtParsed = formatToBRDate(r[colDataSantander]);
+      const jsDate = dtParsed ? dtParsed.dateObj : null;
+      const strDate = dtParsed ? dtParsed.str : "-";
       const valor = toNumber(r[colValSantander]);
       const identificadorColH = normKey(r[colIdentificadorSantander]) || "-";
 
       if (!cleanNsu && !rawNsu) continue;
-
-      if (dataFiltroJs && (!jsDate || !sameDay(dataFiltroJs, jsDate))) continue;
+      if (!inRange(jsDate)) continue;
 
       if (isExcecaoOK(rawNsu)) {
         results.push({
           origem: "Santander",
-          data: jsDate ? jsDate.toLocaleDateString("pt-BR") : "-",
+          data: strDate,
           nsu: cleanNsu || rawNsu,
           identificadorColH: identificadorColH,
           valor: valor,
@@ -1520,7 +1712,7 @@ async function rodarConfirmacaoPagamento() {
 
       results.push({
         origem: "Santander",
-        data: jsDate ? jsDate.toLocaleDateString("pt-BR") : "-",
+        data: strDate,
         nsu: cleanNsu || rawNsu,
         identificadorColH: identificadorColH,
         valor: valor,
@@ -1551,18 +1743,18 @@ async function rodarDuplicidadesVendas() {
   if (!rowsVendas) return alert("Erro ao ler a planilha de Vendas.");
 
   const idxVen = findHeaderAndIndexes(rowsVendas, {
-    pedido: ["id pedido", "pedido", "nº pedido"],
-    cliente: ["cliente", "nome"],
+    pedido: ["id pedido", "pedido", "nº pedido", "número do comprovante de vendas (cv)"],
+    cliente: ["cliente", "nome", "razão social"],
     consultor: ["consultor", "vendedor"],
-    valor: ["valor", "valor líquido"],
-    data: ["data"]
+    valor: ["valor", "valor liquido", "valor total da venda"],
+    data: ["data/hora da venda", "data"]
   });
 
   const colPed = idxVen.indexes.pedido ?? 9;
   const colCli = idxVen.indexes.cliente ?? 2;
   const colCons = idxVen.indexes.consultor ?? 3;
-  const colVal = idxVen.indexes.valor ?? 8;
-  const colData = idxVen.indexes.data ?? 0;
+  const colVal = idxVen.indexes.valor ?? 12;
+  const colData = idxVen.indexes.data ?? 3;
 
   const pedMap = new Map();
 
@@ -1576,8 +1768,8 @@ async function rodarDuplicidadesVendas() {
     const cliente = normKey(r[colCli]);
     const consultor = normKey(r[colCons]);
     const valor = toNumber(r[colVal]);
-    const dJs = excelDateToJsDate(r[colData]);
-    const strData = dJs ? dJs.toLocaleDateString("pt-BR") : "-";
+    const dtParsed = formatToBRDate(r[colData]);
+    const strData = dtParsed ? dtParsed.str : "-";
 
     if (!pedMap.has(cleanPed)) {
       pedMap.set(cleanPed, []);
@@ -1617,4 +1809,469 @@ async function rodarDuplicidadesVendas() {
     { key: "valor", label: "Valor (R$)", isCurrency: true },
     { key: "qntRepeticoes", label: "Ocorrências na Planilha" }
   ], "Duplicidades_Pedidos_Vendas");
+}
+
+// 9. ANÁLISE DE INDICADORES FINANCEIROS
+async function rodarAnaliseIndicadores() {
+  const rows = await parseFileToRows(fileStore.app, "Pedidos");
+  if (!rows) return alert("Erro ao ler a planilha do App.");
+
+  const { headerRowIdx, indexes } = findHeaderAndIndexes(rows, {
+    dtFinAguardando: ["data financeiro aguardando", "data e hora", "criado em"],
+    statusGeral: ["status"],
+    statusFin: ["status financeiro", "status fin"],
+    tPendVer: ["tempo aguardando → verificado (h)", "tempo aguardando verificado"],
+    tVerConf: ["tempo verificado → confirmado (h)", "tempo verificado confirmado"],
+    tTotal: ["tempo total aguardando → confirmado (h)", "tempo total aguardando confirmado"]
+  });
+
+  const colDtFinAguardando = indexes.dtFinAguardando !== undefined && indexes.dtFinAguardando !== -1 ? indexes.dtFinAguardando : 4;
+  const colStGeralApp = indexes.statusGeral !== undefined && indexes.statusGeral !== -1 ? indexes.statusGeral : 7;
+  const colStatusFin = indexes.statusFin !== undefined && indexes.statusFin !== -1 ? indexes.statusFin : 8;
+  const colTPendVer = indexes.tPendVer !== undefined && indexes.tPendVer !== -1 ? indexes.tPendVer : 33;
+  const colTVerConf = indexes.tVerConf !== undefined && indexes.tVerConf !== -1 ? indexes.tVerConf : 34;
+  const colTTotal = indexes.tTotal !== undefined && indexes.tTotal !== -1 ? indexes.tTotal : 35;
+
+  const { ini: dtMainIni, fim: dtMainFim } = getFlatpickrRange(pickerIndPrincipal);
+  const { ini: dtCompIni, fim: dtCompFim } = getFlatpickrRange(pickerIndComp);
+
+  function isNoRange(dt, ini, fim) {
+    if (!dt) return false;
+    if (ini && dt < ini) return false;
+    if (fim && dt > fim) return false;
+    return true;
+  }
+
+  let totalMain = 0, cntConfMain = 0, cntVerifMain = 0, cntPendMain = 0;
+  const evolucaoDiariaMap = new Map();
+
+  let listTPendVer = [];
+  let listTVerConf = [];
+  let listTTotal = [];
+
+  const faixasSLA = {
+    ate24h: 0,
+    entre24e48h: 0,
+    entre48e72h: 0,
+    entre3e5dias: 0,
+    entre5e10dias: 0,
+    acima10dias: 0
+  };
+
+  let totalComp = 0, cntConfComp = 0, cntVerifComp = 0, cntPendComp = 0;
+  let temComparativo = false;
+
+  for (let i = headerRowIdx + 1; i < rows.length; i++) {
+    const r = rows[i];
+    
+    const dtParsed = formatToBRDate(r[colDtFinAguardando]);
+    if (!dtParsed) continue;
+
+    const dtPed = dtParsed.dateObj;
+    const strDateBR = dtParsed.str;
+
+    const rawStatusFin = normKey(r[colStatusFin]).toLowerCase();
+    const rawStatusGeral = normKey(r[colStGeralApp]).toLowerCase();
+
+    if (rawStatusFin.includes("cancelad") || rawStatusGeral.includes("cancelad")) {
+      continue;
+    }
+
+    let statusCat = "Pendente";
+
+    if (rawStatusFin.includes("confirmado") || rawStatusFin.includes("pgto confirmado")) {
+      statusCat = "Confirmado";
+    } else if (rawStatusFin.includes("verificado")) {
+      statusCat = "Verificado";
+    }
+
+    if (isNoRange(dtPed, dtMainIni, dtMainFim)) {
+      totalMain++;
+      if (statusCat === "Confirmado") cntConfMain++;
+      else if (statusCat === "Verificado") cntVerifMain++;
+      else cntPendMain++;
+
+      if (!evolucaoDiariaMap.has(strDateBR)) {
+        evolucaoDiariaMap.set(strDateBR, { dataKey: dtPed, dataStr: strDateBR, total: 0, confirmado: 0, verificado: 0, pendente: 0 });
+      }
+      const dItem = evolucaoDiariaMap.get(strDateBR);
+      dItem.total++;
+      if (statusCat === "Confirmado") dItem.confirmado++;
+      if (statusCat === "Verificado") dItem.verificado++;
+      if (statusCat === "Pendente") dItem.pendente++;
+
+      const valPendVer = toNumber(r[colTPendVer]);
+      const valVerConf = toNumber(r[colTVerConf]);
+      const valTotal = toNumber(r[colTTotal]);
+
+      if (valPendVer !== null && valPendVer >= 0) listTPendVer.push(valPendVer);
+      if (valVerConf !== null && valVerConf >= 0) listTVerConf.push(valVerConf);
+
+      if (valTotal !== null && valTotal >= 0) {
+        listTTotal.push(valTotal);
+
+        if (valTotal <= 24) faixasSLA.ate24h++;
+        else if (valTotal <= 48) faixasSLA.entre24e48h++;
+        else if (valTotal <= 72) faixasSLA.entre48e72h++;
+        else if (valTotal <= 120) faixasSLA.entre3e5dias++;
+        else if (valTotal <= 240) faixasSLA.entre5e10dias++;
+        else faixasSLA.acima10dias++;
+      }
+    }
+
+    if ((dtCompIni || dtCompFim) && isNoRange(dtPed, dtCompIni, dtCompFim)) {
+      temComparativo = true;
+      totalComp++;
+      if (statusCat === "Confirmado") cntConfComp++;
+      else if (statusCat === "Verificado") cntVerifComp++;
+      else cntPendComp++;
+    }
+  }
+
+  const avg = arr => arr.length > 0 ? (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1) : "0.0";
+  const calcPct = (v, t) => t > 0 ? ((v / t) * 100).toFixed(1) : "0.0";
+
+  const listDiariaOrdenada = Array.from(evolucaoDiariaMap.values()).sort((a, b) => a.dataKey - b.dataKey);
+  const totalConfirmadosComSLA = listTTotal.length;
+
+  const el = document.getElementById("result-indicadores");
+  el.style.display = "block";
+  el.innerHTML = "";
+
+  let html = `
+    <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;">
+      <button id="btn-copy-gamma" style="background: #6b46c1; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer;">
+        📋 Copiar Resumo Formatado para o Gamma
+      </button>
+      <button id="btn-export-xlsx-ind" style="background: #2b6cb0; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer;">
+        📥 Exportar Indicadores (.xlsx)
+      </button>
+    </div>
+
+    <!-- 1. DISTRIBUIÇÃO POR STATUS FINANCEIRO -->
+    <div style="margin-bottom: 25px;">
+      <h2>📊 1. Distribuição por Status Financeiro</h2>
+      <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-top: 15px;">
+        <div style="background: #2b303b; padding: 15px; border-radius: 8px; flex: 1; min-width: 180px;">
+          <small style="color: #a0aec0;">Total de Pedidos</small>
+          <div style="font-size: 24px; font-weight: bold; color: #fff;">${totalMain}</div>
+        </div>
+        <div style="background: #1e3a2b; padding: 15px; border-radius: 8px; flex: 1; min-width: 180px;">
+          <small style="color: #68d391;">Pgto Confirmado</small>
+          <div style="font-size: 24px; font-weight: bold; color: #48bb78;">${cntConfMain} (${calcPct(cntConfMain, totalMain)}%)</div>
+        </div>
+        <div style="background: #3d321d; padding: 15px; border-radius: 8px; flex: 1; min-width: 180px;">
+          <small style="color: #f6ad55;">Verificado</small>
+          <div style="font-size: 24px; font-weight: bold; color: #ecc94b;">${cntVerifMain} (${calcPct(cntVerifMain, totalMain)}%)</div>
+        </div>
+        <div style="background: #3b1e1e; padding: 15px; border-radius: 8px; flex: 1; min-width: 180px;">
+          <small style="color: #fc8181;">Pagamento Pendente</small>
+          <div style="font-size: 24px; font-weight: bold; color: #f56565;">${cntPendMain} (${calcPct(cntPendMain, totalMain)}%)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. EVOLUÇÃO DIÁRIA DE PEDIDOS -->
+    <div style="margin-bottom: 25px;">
+      <h2>📈 2. Evolução Diária de Pedidos</h2>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Data Chegada Fin. (Coluna E)</th>
+              <th>Total Pedidos</th>
+              <th>Pgto Confirmado</th>
+              <th>Verificado</th>
+              <th>Pagamento Pendente</th>
+              <th>% Conversão Dia</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${listDiariaOrdenada.map(d => `
+              <tr>
+                <td><b>${d.dataStr}</b></td>
+                <td>${d.total}</td>
+                <td style="color: #48bb78; font-weight: bold;">${d.confirmado}</td>
+                <td style="color: #ecc94b;">${d.verificado}</td>
+                <td style="color: #f56565;">${d.pendente}</td>
+                <td>${calcPct(d.confirmado, d.total)}%</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 3. TEMPOS MÉDIOS DE PROCESSAMENTO -->
+    <div style="margin-bottom: 25px;">
+      <h2>⏱️ 3. Tempos Médios de Processamento (SLA)</h2>
+      <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-top: 15px;">
+        <div style="background: #1a202c; border: 1px solid #2d3748; padding: 15px; border-radius: 8px; flex: 1; min-width: 200px;">
+          <small style="color: #a0aec0;">Aguardando → Verificado (h)</small>
+          <div style="font-size: 22px; font-weight: bold; color: #63b3ed;">${avg(listTPendVer)}h</div>
+        </div>
+        <div style="background: #1a202c; border: 1px solid #2d3748; padding: 15px; border-radius: 8px; flex: 1; min-width: 200px;">
+          <small style="color: #a0aec0;">Verificado → Confirmado (h)</small>
+          <div style="font-size: 22px; font-weight: bold; color: #63b3ed;">${avg(listTVerConf)}h</div>
+        </div>
+        <div style="background: #1a202c; border: 1px solid #3182ce; padding: 15px; border-radius: 8px; flex: 1; min-width: 200px;">
+          <small style="color: #a0aec0;">Total Aguardando → Confirmado (h)</small>
+          <div style="font-size: 22px; font-weight: bold; color: #3182ce;">${avg(listTTotal)}h</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. MATRIZ REAL DE TEMPO DE CONFIRMAÇÃO -->
+    <div style="margin-bottom: 25px;">
+      <h2>📅 4. Matriz Real de Tempo de Confirmação</h2>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Faixa de Tempo</th>
+              <th>Qtd. Pedidos</th>
+              <th>% do Total Confirmado</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><b>Até 24h</b></td><td>${faixasSLA.ate24h}</td><td><b>${calcPct(faixasSLA.ate24h, totalConfirmadosComSLA)}%</b></td></tr>
+            <tr><td><b>24 a 48h</b></td><td>${faixasSLA.entre24e48h}</td><td>${calcPct(faixasSLA.entre24e48h, totalConfirmadosComSLA)}%</td></tr>
+            <tr><td><b>48 a 72h</b></td><td>${faixasSLA.entre48e72h}</td><td>${calcPct(faixasSLA.entre48e72h, totalConfirmadosComSLA)}%</td></tr>
+            <tr><td><b>3 a 5 dias</b></td><td>${faixasSLA.entre3e5dias}</td><td>${calcPct(faixasSLA.entre3e5dias, totalConfirmadosComSLA)}%</td></tr>
+            <tr><td><b>5 a 10 dias</b></td><td>${faixasSLA.entre5e10dias}</td><td>${calcPct(faixasSLA.entre5e10dias, totalConfirmadosComSLA)}%</td></tr>
+            <tr><td><b>Acima de 10 dias</b></td><td>${faixasSLA.acima10dias}</td><td>${calcPct(faixasSLA.acima10dias, totalConfirmadosComSLA)}%</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  if (temComparativo) {
+    html += `
+      <div style="margin-bottom: 25px; padding-top: 15px; border-top: 2px dashed #4a5568;">
+        <h2>🔄 5. Comparativo Semanal</h2>
+        <div class="tablewrap" style="margin-top: 15px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Métrica / Status</th>
+                <th>Semana Anterior</th>
+                <th>Semana Atual</th>
+                <th>Variação</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>Total de Pedidos</b></td>
+                <td>${totalComp}</td>
+                <td>${totalMain}</td>
+                <td><b>${(totalMain - totalComp) >= 0 ? '+' : ''}${totalMain - totalComp} pedidos</b></td>
+              </tr>
+              <tr>
+                <td><b>Pgto Confirmado</b></td>
+                <td>${cntConfComp} (${calcPct(cntConfComp, totalComp)}%)</td>
+                <td>${cntConfMain} (${calcPct(cntConfMain, totalMain)}%)</td>
+                <td style="color: ${cntConfMain >= cntConfComp ? '#48bb78' : '#f56565'}; font-weight: bold;">
+                  ${(calcPct(cntConfMain, totalMain) - calcPct(cntConfComp, totalComp)).toFixed(1)}% p.p.
+                </td>
+              </tr>
+              <tr>
+                <td><b>Verificado</b></td>
+                <td>${cntVerifComp} (${calcPct(cntVerifComp, totalComp)}%)</td>
+                <td>${cntVerifMain} (${calcPct(cntVerifMain, totalMain)}%)</td>
+                <td>${(calcPct(cntVerifMain, totalMain) - calcPct(cntVerifComp, totalComp)).toFixed(1)}% p.p.</td>
+              </tr>
+              <tr>
+                <td><b>Pagamento Pendente</b></td>
+                <td>${cntPendComp} (${calcPct(cntPendComp, totalComp)}%)</td>
+                <td>${cntPendMain} (${calcPct(cntPendMain, totalMain)}%)</td>
+                <td>${(calcPct(cntPendMain, totalMain) - calcPct(cntPendComp, totalComp)).toFixed(1)}% p.p.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  el.innerHTML = html;
+
+  document.getElementById("btn-copy-gamma").addEventListener("click", () => {
+    let textForGamma = `DISTRIBUIÇÃO POR STATUS FINANCEIRO\n`;
+    textForGamma += `Total de Pedidos no Período: ${totalMain}\n`;
+    textForGamma += `Pagamento Confirmado: ${cntConfMain} pedidos (${calcPct(cntConfMain, totalMain)}%)\n`;
+    textForGamma += `Verificado: ${cntVerifMain} pedidos (${calcPct(cntVerifMain, totalMain)}%)\n`;
+    textForGamma += `Pagamento Pendente: ${cntPendMain} pedidos (${calcPct(cntPendMain, totalMain)}%)\n\n`;
+
+    textForGamma += `EVOLUÇÃO DIÁRIA DE PEDIDOS\nData Chegada | Total | Confirmado | Verificado | Pendente | Conversão\n`;
+    listDiariaOrdenada.forEach(d => {
+      textForGamma += `${d.dataStr} | ${d.total} | ${d.confirmado} | ${d.verificado} | ${d.pendente} | ${calcPct(d.confirmado, d.total)}%\n`;
+    });
+
+    textForGamma += `\nTEMPOS MÉDIOS DE PROCESSAMENTO (SLA)\n`;
+    textForGamma += `Pendente -> Verificado: ${avg(listTPendVer)}h\n`;
+    textForGamma += `Verificado -> Confirmado: ${avg(listTVerConf)}h\n`;
+    textForGamma += `Total End-to-End: ${avg(listTTotal)}h\n\n`;
+
+    textForGamma += `MATRIZ REAL DE TEMPO DE CONFIRMAÇÃO\n`;
+    textForGamma += `Até 24h: ${faixasSLA.ate24h} (${calcPct(faixasSLA.ate24h, totalConfirmadosComSLA)}%)\n`;
+    textForGamma += `24 a 48h: ${faixasSLA.entre24e48h} (${calcPct(faixasSLA.entre24e48h, totalConfirmadosComSLA)}%)\n`;
+    textForGamma += `48 a 72h: ${faixasSLA.entre48e72h} (${calcPct(faixasSLA.entre48e72h, totalConfirmadosComSLA)}%)\n`;
+    textForGamma += `3 a 5 dias: ${faixasSLA.entre3e5dias} (${calcPct(faixasSLA.entre3e5dias, totalConfirmadosComSLA)}%)\n`;
+    textForGamma += `5 a 10 dias: ${faixasSLA.entre5e10dias} (${calcPct(faixasSLA.entre5e10dias, totalConfirmadosComSLA)}%)\n`;
+    textForGamma += `Acima de 10 dias: ${faixasSLA.acima10dias} (${calcPct(faixasSLA.acima10dias, totalConfirmadosComSLA)}%)\n`;
+
+    if (temComparativo) {
+      textForGamma += `\nCOMPARATIVO SEMANAL\n`;
+      textForGamma += `Total de Pedidos: Anterior ${totalComp} vs Atual ${totalMain}\n`;
+      textForGamma += `Pgto Confirmado: Anterior ${cntConfComp} (${calcPct(cntConfComp, totalComp)}%) vs Atual ${cntConfMain} (${calcPct(cntConfMain, totalMain)}%)\n`;
+    }
+
+    navigator.clipboard.writeText(textForGamma).then(() => {
+      alert("✅ Resumo copiado para a área de transferência! Cole no Gamma.");
+    });
+  });
+
+  document.getElementById("btn-export-xlsx-ind").addEventListener("click", () => {
+    const wb = XLSX.utils.book_new();
+
+    const dsResumo = [
+      ["Métrica", "Valor", "Percentual"],
+      ["Total de Pedidos", totalMain, "100%"],
+      ["Pgto Confirmado", cntConfMain, `${calcPct(cntConfMain, totalMain)}%`],
+      ["Verificado", cntVerifMain, `${calcPct(cntVerifMain, totalMain)}%`],
+      ["Pagamento Pendente", cntPendMain, `${calcPct(cntPendMain, totalMain)}%`],
+      [],
+      ["Métrica de Tempo (SLA)", "Horas Média"],
+      ["Pendente -> Verificado", `${avg(listTPendVer)}h`],
+      ["Verificado -> Confirmado", `${avg(listTVerConf)}h`],
+      ["Total End-to-End", `${avg(listTTotal)}h`]
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dsResumo), "Resumo_Geral");
+
+    const dsDiario = [["Data Chegada Fin.", "Total Pedidos", "Confirmados", "Verificados", "Pendentes", "% Conversão"]];
+    listDiariaOrdenada.forEach(d => {
+      dsDiario.push([d.dataStr, d.total, d.confirmado, d.verificado, d.pendente, `${calcPct(d.confirmado, d.total)}%`]);
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dsDiario), "Evolucao_Diaria");
+
+    const dsMatriz = [
+      ["Faixa de Tempo", "Qtd Pedidos", "% do Total Confirmado"],
+      ["Até 24h", faixasSLA.ate24h, `${calcPct(faixasSLA.ate24h, totalConfirmadosComSLA)}%`],
+      ["24 a 48h", faixasSLA.entre24e48h, `${calcPct(faixasSLA.entre24e48h, totalConfirmadosComSLA)}%`],
+      ["48 a 72h", faixasSLA.entre48e72h, `${calcPct(faixasSLA.entre48e72h, totalConfirmadosComSLA)}%`],
+      ["3 a 5 dias", faixasSLA.entre3e5dias, `${calcPct(faixasSLA.entre3e5dias, totalConfirmadosComSLA)}%`],
+      ["5 a 10 dias", faixasSLA.entre5e10dias, `${calcPct(faixasSLA.entre5e10dias, totalConfirmadosComSLA)}%`],
+      ["Acima de 10 dias", faixasSLA.acima10dias, `${calcPct(faixasSLA.acima10dias, totalConfirmadosComSLA)}%`]
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dsMatriz), "Matriz_SLA");
+
+    XLSX.writeFile(wb, `Indicadores_Financeiros_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  });
+}
+
+// 10. AUDITORIA DE CANCELAMENTOS (Vendas x App)
+async function rodarCancelamentos() {
+  const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
+  const rowsVendas = await parseFileToRows(fileStore.vendas);
+
+  if (!rowsApp || !rowsVendas) return alert("Erro ao carregar arquivos para auditoria.");
+
+  const idxVen = findHeaderAndIndexes(rowsVendas, {
+    pedido: ["id pedido", "nº pedido", "pedido", "número do comprovante de vendas (cv)"],
+    valor: ["valor", "valor liquido", "valor total da venda"],
+    status: ["status da transação", "status"]
+  });
+
+  const idxApp = findHeaderAndIndexes(rowsApp, {
+    pedido: ["número", "nº pedido", "pedido", "id"],
+    statusGeral: ["status"],
+    statusFin: ["status financeiro", "status fin"]
+  });
+
+  const colPedVen = idxVen.indexes.pedido ?? 9;
+  const colValVen = idxVen.indexes.valor ?? 12;
+  const colStVen = idxVen.indexes.status ?? 8;
+
+  const colPedApp = idxApp.indexes.pedido ?? 0;
+  const colStGeralApp = idxApp.indexes.statusGeral ?? 7;
+  const colStFinApp = idxApp.indexes.statusFin ?? 8;
+
+  const appMap = new Map();
+  for (let i = idxApp.headerRowIdx + 1; i < rowsApp.length; i++) {
+    const r = rowsApp[i];
+    const rawPed = normKey(r[colPedApp]);
+    const cleanPed = normPedido(rawPed);
+
+    if (cleanPed) {
+      appMap.set(cleanPed, {
+        rawPed: rawPed,
+        statusGeral: normKey(r[colStGeralApp]),
+        statusFin: normKey(r[colStFinApp])
+      });
+    }
+  }
+
+  const results = [];
+
+  for (let i = idxVen.headerRowIdx + 1; i < rowsVendas.length; i++) {
+    const r = rowsVendas[i];
+    const rawPed = normKey(r[colPedVen]);
+    const cleanPed = normPedido(rawPed);
+
+    if (!cleanPed) continue;
+
+    const valVendas = toNumber(r[colValVen]) ?? 0;
+    const stVendas = normKey(r[colStVen]);
+    const stVendasClean = sanitizeText(stVendas);
+
+    if (stVendasClean.includes("credito") && valVendas === 0) {
+      continue;
+    }
+
+    const isVendasCancelado = stVendasClean.includes("cancelad") || stVendasClean.includes("estornad");
+    const isVendasValorPositivo = valVendas > 0;
+    const isVendasValorZerado = valVendas === 0;
+
+    const appMatch = appMap.get(cleanPed);
+    const stAppGeralClean = appMatch ? sanitizeText(appMatch.statusGeral) : "";
+    const stAppFinClean = appMatch ? sanitizeText(appMatch.statusFin) : "";
+
+    const isAppCancelado = stAppGeralClean.includes("cancelad") || stAppFinClean.includes("cancelad");
+
+    let isDivergenciaValida = false;
+    let label = "";
+
+    if (isVendasCancelado && isVendasValorPositivo && isAppCancelado) {
+      isDivergenciaValida = true;
+      label = "Divergente: Cancelado em Vendas com Valor Positivo (App Cancelado)";
+    } else if (isVendasCancelado && isVendasValorPositivo && !isAppCancelado) {
+      isDivergenciaValida = true;
+      label = "Divergente: Cancelado em Vendas com Valor Positivo (App Ativo)";
+    } else if (!isVendasCancelado && isVendasValorZerado && isAppCancelado) {
+      isDivergenciaValida = true;
+      label = "Divergente: Vendas Ativo (Zerado) e App Cancelado";
+    } else if (isVendasCancelado && isVendasValorZerado && !isAppCancelado) {
+      isDivergenciaValida = true;
+      label = "Divergente: Cancelado em Vendas e Ativo no App";
+    }
+
+    if (isDivergenciaValida) {
+      results.push({
+        pedido: rawPed,
+        statusVendas: `${stVendas || "N/A"} (${formatBRL(valVendas)})`,
+        statusAppPedido: appMatch ? (appMatch.statusGeral || "-") : "Não Encontrado",
+        statusAppFin: appMatch ? (appMatch.statusFin || "-") : "Não Encontrado",
+        _status: "bad",
+        _statusLabel: label
+      });
+    }
+  }
+
+  renderResult("result-cancelamentos", results, [
+    { key: "pedido", label: "Nº Pedido" },
+    { key: "statusVendas", label: "Status / Valor (Vendas)" },
+    { key: "statusAppPedido", label: "Status Pedido (App)" },
+    { key: "statusAppFin", label: "Status Financeiro (App)" }
+  ], "Auditoria_Cancelamentos_Vendas_x_App");
 }

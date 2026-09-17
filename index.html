@@ -5,8 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Conferência Automática de Planilhas</title>
   <link rel="stylesheet" href="style.css">
+  
   <!-- Lib xlsx -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- Flatpickr (Calendário de Seleção por Intervalo/Range) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/pt.js"></script>
 </head>
 <body>
 
@@ -78,6 +84,8 @@
     <div class="tab" data-tab="datapagto">6 · Data Pagamento (App × Extratos)</div>
     <div class="tab" data-tab="confirmacao">7 · Confirmação Pgto (Extratos → App)</div>
     <div class="tab" data-tab="duplicidadevendas">8 · Duplicidades Pedidos (Vendas)</div>
+    <div class="tab" data-tab="indicadores">9 · Indicadores Financeiros</div>
+    <div class="tab" data-tab="cancelamentos">10 · Cancelamentos (Vendas × App)</div>
   </div>
 
   <!-- TAB 1: DUPLICIDADES NSU -->
@@ -146,14 +154,14 @@
       <h2>Conferir Confirmação no App (Extratos Safra/Pix/Santander → App)</h2>
       <p class="desc">Verifica se os pagamentos recebidos no <b>Safra, Pix e Santander</b> já estão com o status <b>Pgto Confirmado (Coluna I / Status Financeiro)</b> no App.</p>
       
-      <!-- Filtro de Data -->
-      <div style="margin: 15px 0 20px; padding: 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;">
-        <label style="font-weight: 600; font-size: 13px; color: #495057; display: block; margin-bottom: 6px;">
-          📅 Filtrar pagamentos de um dia específico (Opcional):
+      <!-- Filtro de Período via Calendário Range -->
+      <div style="margin: 15px 0 20px; padding: 15px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;">
+        <label style="font-weight: 600; font-size: 13px; color: #495057; display: block; margin-bottom: 8px;">
+          📅 Filtrar Período de Liquidação (Opcional):
         </label>
-        <div style="display: flex; gap: 10px; align-items: center;">
-          <input type="date" id="filtro-data-confirmacao" style="padding: 8px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
-          <button type="button" onclick="document.getElementById('filtro-data-confirmacao').value=''" style="padding: 8px 12px; background: #e2e8f0; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Limpar Data (Analisar Todos os Dias)</button>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+          <input type="text" id="filtro-periodo-confirmacao" placeholder="Clique para selecionar o período (Data Inicial → Final)" style="padding: 9px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; min-width: 320px; background: #fff; cursor: pointer;">
+          <button type="button" id="btn-limpar-periodo-conf" style="padding: 9px 14px; background: #e2e8f0; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;">Limpar Período (Analisar Todos os Dias)</button>
         </div>
       </div>
 
@@ -171,6 +179,53 @@
     </div>
     <div class="card" id="result-duplicidadevendas" style="display:none;"></div>
   </div>
+
+  <!-- TAB 9: INDICADORES FINANCEIROS -->
+  <div class="panel" id="panel-indicadores">
+    <div class="card">
+      <h2>Análise de Indicadores Financeiros</h2>
+      <p class="desc">Métricas completas baseadas nas colunas reais da planilha do App (Status, SLA em Horas, Evolução Diária e Comparativo Semanal).</p>
+      
+      <!-- Filtros com Calendários Range (Semana Atual & Semana Anterior) -->
+      <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e2e8f0;">
+        <h3 style="font-size: 14px; margin-bottom: 12px; color: #2d3748;">📅 Períodos de Análise (Data de Chegada na Coluna E)</h3>
+        
+        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+          <!-- Semana Atual / Período Principal -->
+          <div style="flex: 1; min-width: 280px;">
+            <label style="font-weight: 600; font-size: 12px; display: block; margin-bottom: 6px; color: #4a5568;">Semana Atual / Período Principal:</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="text" id="ind-periodo-principal" placeholder="Selecione a semana atual..." style="padding: 8px 12px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 13px; width: 100%; background: #fff; cursor: pointer;">
+              <button type="button" id="btn-limpar-ind-principal" style="padding: 8px 10px; background: #edf2f7; border: 1px solid #cbd5e0; border-radius: 4px; cursor: pointer; font-size: 11px;">Clear</button>
+            </div>
+          </div>
+
+          <!-- Semana Anterior (Opcional) -->
+          <div style="flex: 1; min-width: 280px;">
+            <label style="font-weight: 600; font-size: 12px; display: block; margin-bottom: 6px; color: #4a5568;">Semana Anterior para Comparativo (Opcional):</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="text" id="ind-periodo-comparativo" placeholder="Selecione a semana anterior..." style="padding: 8px 12px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 13px; width: 100%; background: #fff; cursor: pointer;">
+              <button type="button" id="btn-limpar-ind-comp" style="padding: 8px 10px; background: #edf2f7; border: 1px solid #cbd5e0; border-radius: 4px; cursor: pointer; font-size: 11px;">Clear</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn-export btn-executar" data-analise="indicadores" style="width: 100%; padding: 10px;">⚡ Gerar Indicadores Financeiros</button>
+    </div>
+    <div class="card" id="result-indicadores" style="display:none;"></div>
+  </div>
+
+  <!-- TAB 10: AUDITORIA DE CANCELAMENTOS -->
+  <div class="panel" id="panel-cancelamentos">
+    <div class="card">
+      <h2>Conferência de Cancelamentos (Vendas × App)</h2>
+      <p class="desc">Verifica se pedidos cancelados e zerados em <b>Vendas</b> constam devidamente com status <b>Cancelado</b> no App (Pedido e Financeiro).</p>
+      <button class="btn-export btn-executar" data-analise="cancelamentos" style="width: 100%; padding: 10px;">▶ Rodar Auditoria de Cancelamentos</button>
+    </div>
+    <div class="card" id="result-cancelamentos" style="display:none;"></div>
+  </div>
+
 
   <script src="script.js"></script>
 </body>
