@@ -86,6 +86,7 @@
     <div class="tab" data-tab="duplicidadevendas">8 · Duplicidades Pedidos (Vendas)</div>
     <div class="tab" data-tab="indicadores">9 · Indicadores Financeiros</div>
     <div class="tab" data-tab="cancelamentos">10 · Cancelamentos (Vendas × App)</div>
+    <div class="tab" data-tab="vendasnoapp">11 · Vendas no App (Vendas × App)</div>
   </div>
 
   <!-- TAB 1: DUPLICIDADES NSU -->
@@ -186,7 +187,7 @@
       <h2>Análise de Indicadores Financeiros</h2>
       <p class="desc">Métricas completas baseadas nas colunas reais da planilha do App (Status, SLA em Horas, Evolução Diária e Comparativo Semanal).</p>
       
-      <!-- Filtros com Calendários Range (Semana Atual & Semana Anterior) -->
+      <!-- Filtros com Calendários Range -->
       <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e2e8f0;">
         <h3 style="font-size: 14px; margin-bottom: 12px; color: #2d3748;">📅 Períodos de Análise (Data de Chegada na Coluna E)</h3>
         
@@ -226,6 +227,15 @@
     <div class="card" id="result-cancelamentos" style="display:none;"></div>
   </div>
 
+  <!-- TAB 11: PRESENÇA DE VENDAS NO APP -->
+  <div class="panel" id="panel-vendasnoapp">
+    <div class="card">
+      <h2>Verificar Presença de Vendas no App</h2>
+      <p class="desc">Verifica se todos os pedidos registrados na planilha de <b>Vendas</b> constam na planilha extraída do <b>App</b>.</p>
+      <button class="btn-export btn-executar" data-analise="vendasnoapp" style="width: 100%; padding: 10px;">▶ Rodar Verificação de Vendas no App</button>
+    </div>
+    <div class="card" id="result-vendasnoapp" style="display:none;"></div>
+  </div>
 
   <script src="script.js"></script>
 </body>

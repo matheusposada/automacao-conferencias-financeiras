@@ -573,6 +573,11 @@ document.querySelectorAll(".btn-executar").forEach(btn => {
         if (!fileStore.app || !fileStore.vendas) return alert("Por favor, carregue as planilhas do App e de Vendas no topo.");
         await rodarCancelamentos();
         break;
+
+      case "vendasnoapp":
+        if (!fileStore.app || !fileStore.vendas) return alert("Por favor, carregue as planilhas do App e de Vendas no topo.");
+        await rodarVendasNoApp();
+        break;
     }
   });
 });
@@ -1433,7 +1438,10 @@ async function rodarConfirmacaoPagamento() {
             existente.pedido = `${existente.pedido} / ${rawPed}`;
           }
 
-          if (!stLowerNovo.includes("confirmado") && stLowerExistente.includes("confirmado")) {
+          const isNovoConfirmadoOuFaturado = stLowerNovo.includes("confirmado") || stLowerNovo.includes("faturado") || stLowerNovo.includes("faturamento");
+          const isExistenteConfirmadoOuFaturado = stLowerExistente.includes("confirmado") || stLowerExistente.includes("faturado") || stLowerExistente.includes("faturamento");
+
+          if (!isNovoConfirmadoOuFaturado && isExistenteConfirmadoOuFaturado) {
             existente.statusFin = statusFin;
           }
         } else {
@@ -1454,6 +1462,16 @@ async function rodarConfirmacaoPagamento() {
     if (dtFiltroIni && jsDate < dtFiltroIni) return false;
     if (dtFiltroFim && jsDate > dtFiltroFim) return false;
     return true;
+  }
+
+  function isConfirmadoStatus(stLower) {
+    return (
+      stLower.includes("pgto confirmado") ||
+      stLower.includes("pagamento_confirmado") ||
+      stLower.includes("confirmado") ||
+      stLower.includes("faturado") ||
+      stLower.includes("faturamento")
+    );
   }
 
   const results = [];
@@ -1527,7 +1545,7 @@ async function rodarConfirmacaoPagamento() {
         label = "Não Encontrado no App";
       } else {
         const stLower = appMatch.statusFin.toLowerCase();
-        if (stLower.includes("pgto confirmado") || stLower.includes("pagamento_confirmado") || stLower.includes("confirmado")) {
+        if (isConfirmadoStatus(stLower)) {
           status = "ok";
           label = "OK (Pgto Confirmado)";
         } else {
@@ -1611,7 +1629,7 @@ async function rodarConfirmacaoPagamento() {
         label = "Não Encontrado no App";
       } else {
         const stLower = appMatch.statusFin.toLowerCase();
-        if (stLower.includes("pgto confirmado") || stLower.includes("pagamento_confirmado") || stLower.includes("confirmado")) {
+        if (isConfirmadoStatus(stLower)) {
           status = "ok";
           label = "OK (Pgto Confirmado)";
         } else {
@@ -1701,7 +1719,7 @@ async function rodarConfirmacaoPagamento() {
         label = "Não Encontrado no App";
       } else {
         const stLower = appMatch.statusFin.toLowerCase();
-        if (stLower.includes("pgto confirmado") || stLower.includes("pagamento_confirmado") || stLower.includes("confirmado")) {
+        if (isConfirmadoStatus(stLower)) {
           status = "ok";
           label = "OK (Pgto Confirmado)";
         } else {
@@ -1842,7 +1860,7 @@ async function rodarAnaliseIndicadores() {
     return true;
   }
 
-  let totalMain = 0, cntConfMain = 0, cntVerifMain = 0, cntPendMain = 0;
+  let totalMain = 0, cntConfMain = 0, cntAguardMain = 0, cntPendMain = 0;
   const evolucaoDiariaMap = new Map();
 
   let listTPendVer = [];
@@ -1858,7 +1876,7 @@ async function rodarAnaliseIndicadores() {
     acima10dias: 0
   };
 
-  let totalComp = 0, cntConfComp = 0, cntVerifComp = 0, cntPendComp = 0;
+  let totalComp = 0, cntConfComp = 0, cntAguardComp = 0, cntPendComp = 0;
   let temComparativo = false;
 
   for (let i = headerRowIdx + 1; i < rows.length; i++) {
@@ -1879,25 +1897,39 @@ async function rodarAnaliseIndicadores() {
 
     let statusCat = "Pendente";
 
-    if (rawStatusFin.includes("confirmado") || rawStatusFin.includes("pgto confirmado")) {
+    if (
+      rawStatusFin.includes("confirmado") || 
+      rawStatusFin.includes("pgto confirmado") || 
+      rawStatusFin.includes("faturado") || 
+      rawStatusFin.includes("faturamento")
+    ) {
       statusCat = "Confirmado";
-    } else if (rawStatusFin.includes("verificado")) {
-      statusCat = "Verificado";
+    } else if (rawStatusFin.includes("aguardando pagamento") || rawStatusFin.includes("verificado")) {
+      statusCat = "Aguardando";
+    } else if (rawStatusFin.includes("pagamento pendente") || rawStatusFin.includes("pendente")) {
+      statusCat = "Pendente";
     }
 
     if (isNoRange(dtPed, dtMainIni, dtMainFim)) {
       totalMain++;
       if (statusCat === "Confirmado") cntConfMain++;
-      else if (statusCat === "Verificado") cntVerifMain++;
+      else if (statusCat === "Aguardando") cntAguardMain++;
       else cntPendMain++;
 
       if (!evolucaoDiariaMap.has(strDateBR)) {
-        evolucaoDiariaMap.set(strDateBR, { dataKey: dtPed, dataStr: strDateBR, total: 0, confirmado: 0, verificado: 0, pendente: 0 });
+        evolucaoDiariaMap.set(strDateBR, { 
+          dataKey: dtPed, 
+          dataStr: strDateBR, 
+          total: 0, 
+          confirmado: 0, 
+          aguardando: 0, 
+          pendente: 0 
+        });
       }
       const dItem = evolucaoDiariaMap.get(strDateBR);
       dItem.total++;
       if (statusCat === "Confirmado") dItem.confirmado++;
-      if (statusCat === "Verificado") dItem.verificado++;
+      if (statusCat === "Aguardando") dItem.aguardando++;
       if (statusCat === "Pendente") dItem.pendente++;
 
       const valPendVer = toNumber(r[colTPendVer]);
@@ -1923,7 +1955,7 @@ async function rodarAnaliseIndicadores() {
       temComparativo = true;
       totalComp++;
       if (statusCat === "Confirmado") cntConfComp++;
-      else if (statusCat === "Verificado") cntVerifComp++;
+      else if (statusCat === "Aguardando") cntAguardComp++;
       else cntPendComp++;
     }
   }
@@ -1961,8 +1993,8 @@ async function rodarAnaliseIndicadores() {
           <div style="font-size: 24px; font-weight: bold; color: #48bb78;">${cntConfMain} (${calcPct(cntConfMain, totalMain)}%)</div>
         </div>
         <div style="background: #3d321d; padding: 15px; border-radius: 8px; flex: 1; min-width: 180px;">
-          <small style="color: #f6ad55;">Verificado</small>
-          <div style="font-size: 24px; font-weight: bold; color: #ecc94b;">${cntVerifMain} (${calcPct(cntVerifMain, totalMain)}%)</div>
+          <small style="color: #f6ad55;">Aguardando Pagamento</small>
+          <div style="font-size: 24px; font-weight: bold; color: #ecc94b;">${cntAguardMain} (${calcPct(cntAguardMain, totalMain)}%)</div>
         </div>
         <div style="background: #3b1e1e; padding: 15px; border-radius: 8px; flex: 1; min-width: 180px;">
           <small style="color: #fc8181;">Pagamento Pendente</small>
@@ -1981,7 +2013,7 @@ async function rodarAnaliseIndicadores() {
               <th>Data Chegada Fin. (Coluna E)</th>
               <th>Total Pedidos</th>
               <th>Pgto Confirmado</th>
-              <th>Verificado</th>
+              <th>Aguardando Pagamento</th>
               <th>Pagamento Pendente</th>
               <th>% Conversão Dia</th>
             </tr>
@@ -1992,7 +2024,7 @@ async function rodarAnaliseIndicadores() {
                 <td><b>${d.dataStr}</b></td>
                 <td>${d.total}</td>
                 <td style="color: #48bb78; font-weight: bold;">${d.confirmado}</td>
-                <td style="color: #ecc94b;">${d.verificado}</td>
+                <td style="color: #ecc94b;">${d.aguardando}</td>
                 <td style="color: #f56565;">${d.pendente}</td>
                 <td>${calcPct(d.confirmado, d.total)}%</td>
               </tr>
@@ -2007,15 +2039,15 @@ async function rodarAnaliseIndicadores() {
       <h2>⏱️ 3. Tempos Médios de Processamento (SLA)</h2>
       <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-top: 15px;">
         <div style="background: #1a202c; border: 1px solid #2d3748; padding: 15px; border-radius: 8px; flex: 1; min-width: 200px;">
-          <small style="color: #a0aec0;">Aguardando → Verificado (h)</small>
+          <small style="color: #a0aec0;">Pendente → Aguardando Pgto (h)</small>
           <div style="font-size: 22px; font-weight: bold; color: #63b3ed;">${avg(listTPendVer)}h</div>
         </div>
         <div style="background: #1a202c; border: 1px solid #2d3748; padding: 15px; border-radius: 8px; flex: 1; min-width: 200px;">
-          <small style="color: #a0aec0;">Verificado → Confirmado (h)</small>
+          <small style="color: #a0aec0;">Aguardando Pgto → Confirmado (h)</small>
           <div style="font-size: 22px; font-weight: bold; color: #63b3ed;">${avg(listTVerConf)}h</div>
         </div>
         <div style="background: #1a202c; border: 1px solid #3182ce; padding: 15px; border-radius: 8px; flex: 1; min-width: 200px;">
-          <small style="color: #a0aec0;">Total Aguardando → Confirmado (h)</small>
+          <small style="color: #a0aec0;">Total Pendente → Confirmado (h)</small>
           <div style="font-size: 22px; font-weight: bold; color: #3182ce;">${avg(listTTotal)}h</div>
         </div>
       </div>
@@ -2076,10 +2108,10 @@ async function rodarAnaliseIndicadores() {
                 </td>
               </tr>
               <tr>
-                <td><b>Verificado</b></td>
-                <td>${cntVerifComp} (${calcPct(cntVerifComp, totalComp)}%)</td>
-                <td>${cntVerifMain} (${calcPct(cntVerifMain, totalMain)}%)</td>
-                <td>${(calcPct(cntVerifMain, totalMain) - calcPct(cntVerifComp, totalComp)).toFixed(1)}% p.p.</td>
+                <td><b>Aguardando Pagamento</b></td>
+                <td>${cntAguardComp} (${calcPct(cntAguardComp, totalComp)}%)</td>
+                <td>${cntAguardMain} (${calcPct(cntAguardMain, totalMain)}%)</td>
+                <td>${(calcPct(cntAguardMain, totalMain) - calcPct(cntAguardComp, totalComp)).toFixed(1)}% p.p.</td>
               </tr>
               <tr>
                 <td><b>Pagamento Pendente</b></td>
@@ -2100,17 +2132,17 @@ async function rodarAnaliseIndicadores() {
     let textForGamma = `DISTRIBUIÇÃO POR STATUS FINANCEIRO\n`;
     textForGamma += `Total de Pedidos no Período: ${totalMain}\n`;
     textForGamma += `Pagamento Confirmado: ${cntConfMain} pedidos (${calcPct(cntConfMain, totalMain)}%)\n`;
-    textForGamma += `Verificado: ${cntVerifMain} pedidos (${calcPct(cntVerifMain, totalMain)}%)\n`;
+    textForGamma += `Aguardando Pagamento: ${cntAguardMain} pedidos (${calcPct(cntAguardMain, totalMain)}%)\n`;
     textForGamma += `Pagamento Pendente: ${cntPendMain} pedidos (${calcPct(cntPendMain, totalMain)}%)\n\n`;
 
-    textForGamma += `EVOLUÇÃO DIÁRIA DE PEDIDOS\nData Chegada | Total | Confirmado | Verificado | Pendente | Conversão\n`;
+    textForGamma += `EVOLUÇÃO DIÁRIA DE PEDIDOS\nData Chegada | Total | Confirmado | Aguardando | Pendente | Conversão\n`;
     listDiariaOrdenada.forEach(d => {
-      textForGamma += `${d.dataStr} | ${d.total} | ${d.confirmado} | ${d.verificado} | ${d.pendente} | ${calcPct(d.confirmado, d.total)}%\n`;
+      textForGamma += `${d.dataStr} | ${d.total} | ${d.confirmado} | ${d.aguardando} | ${d.pendente} | ${calcPct(d.confirmado, d.total)}%\n`;
     });
 
     textForGamma += `\nTEMPOS MÉDIOS DE PROCESSAMENTO (SLA)\n`;
-    textForGamma += `Pendente -> Verificado: ${avg(listTPendVer)}h\n`;
-    textForGamma += `Verificado -> Confirmado: ${avg(listTVerConf)}h\n`;
+    textForGamma += `Pendente -> Aguardando Pgto: ${avg(listTPendVer)}h\n`;
+    textForGamma += `Aguardando Pgto -> Confirmado: ${avg(listTVerConf)}h\n`;
     textForGamma += `Total End-to-End: ${avg(listTTotal)}h\n\n`;
 
     textForGamma += `MATRIZ REAL DE TEMPO DE CONFIRMAÇÃO\n`;
@@ -2139,19 +2171,19 @@ async function rodarAnaliseIndicadores() {
       ["Métrica", "Valor", "Percentual"],
       ["Total de Pedidos", totalMain, "100%"],
       ["Pgto Confirmado", cntConfMain, `${calcPct(cntConfMain, totalMain)}%`],
-      ["Verificado", cntVerifMain, `${calcPct(cntVerifMain, totalMain)}%`],
+      ["Aguardando Pagamento", cntAguardMain, `${calcPct(cntAguardMain, totalMain)}%`],
       ["Pagamento Pendente", cntPendMain, `${calcPct(cntPendMain, totalMain)}%`],
       [],
       ["Métrica de Tempo (SLA)", "Horas Média"],
-      ["Pendente -> Verificado", `${avg(listTPendVer)}h`],
-      ["Verificado -> Confirmado", `${avg(listTVerConf)}h`],
+      ["Pendente -> Aguardando Pgto", `${avg(listTPendVer)}h`],
+      ["Aguardando Pgto -> Confirmado", `${avg(listTVerConf)}h`],
       ["Total End-to-End", `${avg(listTTotal)}h`]
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dsResumo), "Resumo_Geral");
 
-    const dsDiario = [["Data Chegada Fin.", "Total Pedidos", "Confirmados", "Verificados", "Pendentes", "% Conversão"]];
+    const dsDiario = [["Data Chegada Fin.", "Total Pedidos", "Confirmados", "Aguardando Pgto", "Pendentes", "% Conversão"]];
     listDiariaOrdenada.forEach(d => {
-      dsDiario.push([d.dataStr, d.total, d.confirmado, d.verificado, d.pendente, `${calcPct(d.confirmado, d.total)}%`]);
+      dsDiario.push([d.dataStr, d.total, d.confirmado, d.aguardando, d.pendente, `${calcPct(d.confirmado, d.total)}%`]);
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dsDiario), "Evolucao_Diaria");
 
@@ -2170,7 +2202,7 @@ async function rodarAnaliseIndicadores() {
   });
 }
 
-// 10. AUDITORIA DE CANCELAMENTOS (Vendas x App)
+// 10. AUDITORIA DE CANCELAMENTOS (Coluna H de Vendas x Coluna H do App)
 async function rodarCancelamentos() {
   const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
   const rowsVendas = await parseFileToRows(fileStore.vendas);
@@ -2180,98 +2212,253 @@ async function rodarCancelamentos() {
   const idxVen = findHeaderAndIndexes(rowsVendas, {
     pedido: ["id pedido", "nº pedido", "pedido", "número do comprovante de vendas (cv)"],
     valor: ["valor", "valor liquido", "valor total da venda"],
-    status: ["status da transação", "status"]
+    status: ["status da transação", "status"] // Coluna H de Vendas
   });
 
   const idxApp = findHeaderAndIndexes(rowsApp, {
     pedido: ["número", "nº pedido", "pedido", "id"],
-    statusGeral: ["status"],
-    statusFin: ["status financeiro", "status fin"]
+    statusGeral: ["status"] // Coluna H do App
   });
 
   const colPedVen = idxVen.indexes.pedido ?? 9;
-  const colValVen = idxVen.indexes.valor ?? 12;
-  const colStVen = idxVen.indexes.status ?? 8;
+  const colValVen = idxVen.indexes.valor ?? 8;
+  const colStVen = idxVen.indexes.status ?? 7; // Coluna H
 
   const colPedApp = idxApp.indexes.pedido ?? 0;
-  const colStGeralApp = idxApp.indexes.statusGeral ?? 7;
-  const colStFinApp = idxApp.indexes.statusFin ?? 8;
+  const colStGeralApp = idxApp.indexes.statusGeral ?? 7; // Coluna H
 
+  // 1. Mapeia a Coluna H do App ("Status")
   const appMap = new Map();
   for (let i = idxApp.headerRowIdx + 1; i < rowsApp.length; i++) {
     const r = rowsApp[i];
     const rawPed = normKey(r[colPedApp]);
     const cleanPed = normPedido(rawPed);
 
-    if (cleanPed) {
+    if (cleanPed && !appMap.has(cleanPed)) {
+      const stGeral = normKey(r[colStGeralApp]); // Coluna H
+      const stGeralClean = sanitizeText(stGeral);
+
       appMap.set(cleanPed, {
         rawPed: rawPed,
+        statusColH: stGeral,
+        isCancelado: stGeralClean.includes("cancelad")
+      });
+    }
+  }
+
+  // 2. Mapeia a Coluna H de Vendas ("STATUS")
+  const vendasMap = new Map();
+  for (let i = idxVen.headerRowIdx + 1; i < rowsVendas.length; i++) {
+    const r = rowsVendas[i];
+    const rawPed = normKey(r[colPedVen]);
+    const cleanPed = normPedido(rawPed);
+
+    if (!cleanPed || cleanPed === "0" || cleanPed === "manual") continue;
+
+    const valVendas = toNumber(r[colValVen]) ?? 0;
+    const stVendas = normKey(r[colStVen]); // Coluna H
+    const stVendasClean = sanitizeText(stVendas);
+
+    vendasMap.set(cleanPed, {
+      rawPed: rawPed,
+      statusColH: stVendas,
+      valor: valVendas,
+      isCancelado: stVendasClean.includes("cancelad") || stVendasClean.includes("estornad")
+    });
+  }
+
+  const results = [];
+  const processados = new Set();
+
+  // A) Varredura a partir da Coluna H de Vendas
+  vendasMap.forEach((venda, cleanPed) => {
+    processados.add(cleanPed);
+    const appMatch = appMap.get(cleanPed);
+    const isAppCancelado = appMatch ? appMatch.isCancelado : false;
+
+    let isDivergente = false;
+    let label = "";
+
+    if (venda.isCancelado && !isAppCancelado) {
+      isDivergente = true;
+      label = appMatch 
+        ? `Divergente: Cancelado em Vendas (${venda.statusColH}) e Ativo no App (${appMatch.statusColH})` 
+        : "Divergente: Cancelado em Vendas e Não Encontrado no App";
+    } else if (!venda.isCancelado && isAppCancelado) {
+      isDivergente = true;
+      label = `Divergente: Ativo em Vendas (${venda.statusColH}) e Cancelado no App (${appMatch.statusColH})`;
+    }
+
+    if (isDivergente) {
+      results.push({
+        pedido: venda.rawPed,
+        statusVendas: `${venda.statusColH || "N/A"} (${formatBRL(venda.valor)})`,
+        statusAppPedido: appMatch ? (appMatch.statusColH || "-") : "Não Encontrado",
+        _status: "bad",
+        _statusLabel: label
+      });
+    }
+  });
+
+  // B) Varredura dos pedidos no App que estão cancelados mas não existem em Vendas
+  appMap.forEach((appItem, cleanPed) => {
+    if (processados.has(cleanPed)) return;
+
+    if (appItem.isCancelado) {
+      results.push({
+        pedido: appItem.rawPed,
+        statusVendas: "Não Encontrado em Vendas",
+        statusAppPedido: appItem.statusColH || "-",
+        _status: "bad",
+        _statusLabel: "Divergente: Cancelado na Coluna H do App e Não Encontrado em Vendas"
+      });
+    }
+  });
+
+  renderResult("result-cancelamentos", results, [
+    { key: "pedido", label: "Nº Pedido" },
+    { key: "statusVendas", label: "Status / Valor (Vendas - Coluna H)" },
+    { key: "statusAppPedido", label: "Status Pedido (App - Coluna H)" }
+  ], "Auditoria_Cancelamentos_ColH_Vendas_x_App");
+}
+
+// 11. PRESENÇA DE PEDIDOS (Cruzamento Bidirecional: Vendas x App)
+async function rodarVendasNoApp() {
+  const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
+  const rowsVendas = await parseFileToRows(fileStore.vendas);
+
+  if (!rowsApp || !rowsVendas) {
+    return alert("Por favor, carregue as planilhas do App e de Vendas no topo.");
+  }
+
+  const idxApp = findHeaderAndIndexes(rowsApp, {
+    pedido: ["número", "nº pedido", "pedido", "id"],
+    cliente: ["cliente", "nome"],
+    vendedor: ["vendedor (omie)", "vendedor", "consultor"],
+    valor: ["valor total do pedido (r$)", "valor total a pagar", "valor"],
+    statusGeral: ["status"],
+    statusFin: ["status financeiro", "status fin"]
+  });
+
+  const idxVen = findHeaderAndIndexes(rowsVendas, {
+    pedido: ["id pedido", "nº pedido", "pedido", "número do comprovante de vendas (cv)"],
+    cliente: ["cliente", "clientes", "nome", "razão social"],
+    consultor: ["consultor", "vendedor"],
+    valor: ["valor", "valor liquido", "valor total da venda"],
+    data: ["data/hora da venda", "data"]
+  });
+
+  const colPedApp = idxApp.indexes.pedido ?? 0;
+  const colCliApp = idxApp.indexes.cliente ?? 9;
+  const colVendApp = idxApp.indexes.vendedor ?? 11;
+  const colValApp = idxApp.indexes.valor ?? 39;
+  const colStGeralApp = idxApp.indexes.statusGeral ?? 7;
+  const colStFinApp = idxApp.indexes.statusFin ?? 8;
+
+  const colPedVen = idxVen.indexes.pedido ?? 9;
+  const colCliVen = idxVen.indexes.cliente ?? 2;
+  const colConsVen = idxVen.indexes.consultor ?? 3;
+  const colValVen = idxVen.indexes.valor ?? 8;
+  const colDataVen = idxVen.indexes.data ?? 0;
+
+  // 1. Mapeia todos os pedidos da planilha do App
+  const appMap = new Map();
+  for (let i = idxApp.headerRowIdx + 1; i < rowsApp.length; i++) {
+    const r = rowsApp[i];
+    const rawPed = normKey(r[colPedApp]);
+    const cleanPed = normPedido(rawPed);
+
+    if (cleanPed && !appMap.has(cleanPed)) {
+      appMap.set(cleanPed, {
+        rawPed: rawPed,
+        cliente: normKey(r[colCliApp]),
+        vendedor: normKey(r[colVendApp]),
+        valor: toNumber(r[colValApp]),
         statusGeral: normKey(r[colStGeralApp]),
         statusFin: normKey(r[colStFinApp])
       });
     }
   }
 
-  const results = [];
-
+  // 2. Mapeia todos os pedidos da planilha de Vendas
+  const vendasMap = new Map();
   for (let i = idxVen.headerRowIdx + 1; i < rowsVendas.length; i++) {
     const r = rowsVendas[i];
     const rawPed = normKey(r[colPedVen]);
     const cleanPed = normPedido(rawPed);
 
-    if (!cleanPed) continue;
+    if (!cleanPed || cleanPed === "0" || cleanPed === "manual") continue;
 
-    const valVendas = toNumber(r[colValVen]) ?? 0;
-    const stVendas = normKey(r[colStVen]);
-    const stVendasClean = sanitizeText(stVendas);
+    const dtParsed = formatToBRDate(r[colDataVen]);
 
-    if (stVendasClean.includes("credito") && valVendas === 0) {
-      continue;
-    }
-
-    const isVendasCancelado = stVendasClean.includes("cancelad") || stVendasClean.includes("estornad");
-    const isVendasValorPositivo = valVendas > 0;
-    const isVendasValorZerado = valVendas === 0;
-
-    const appMatch = appMap.get(cleanPed);
-    const stAppGeralClean = appMatch ? sanitizeText(appMatch.statusGeral) : "";
-    const stAppFinClean = appMatch ? sanitizeText(appMatch.statusFin) : "";
-
-    const isAppCancelado = stAppGeralClean.includes("cancelad") || stAppFinClean.includes("cancelad");
-
-    let isDivergenciaValida = false;
-    let label = "";
-
-    if (isVendasCancelado && isVendasValorPositivo && isAppCancelado) {
-      isDivergenciaValida = true;
-      label = "Divergente: Cancelado em Vendas com Valor Positivo (App Cancelado)";
-    } else if (isVendasCancelado && isVendasValorPositivo && !isAppCancelado) {
-      isDivergenciaValida = true;
-      label = "Divergente: Cancelado em Vendas com Valor Positivo (App Ativo)";
-    } else if (!isVendasCancelado && isVendasValorZerado && isAppCancelado) {
-      isDivergenciaValida = true;
-      label = "Divergente: Vendas Ativo (Zerado) e App Cancelado";
-    } else if (isVendasCancelado && isVendasValorZerado && !isAppCancelado) {
-      isDivergenciaValida = true;
-      label = "Divergente: Cancelado em Vendas e Ativo no App";
-    }
-
-    if (isDivergenciaValida) {
-      results.push({
-        pedido: rawPed,
-        statusVendas: `${stVendas || "N/A"} (${formatBRL(valVendas)})`,
-        statusAppPedido: appMatch ? (appMatch.statusGeral || "-") : "Não Encontrado",
-        statusAppFin: appMatch ? (appMatch.statusFin || "-") : "Não Encontrado",
-        _status: "bad",
-        _statusLabel: label
+    if (!vendasMap.has(cleanPed)) {
+      vendasMap.set(cleanPed, {
+        rawPed: rawPed,
+        data: dtParsed ? dtParsed.str : "-",
+        cliente: normKey(r[colCliVen]),
+        consultor: normKey(r[colConsVen]),
+        valor: toNumber(r[colValVen])
       });
     }
   }
 
-  renderResult("result-cancelamentos", results, [
+  const results = [];
+
+  // A) Checa tudo que está em Vendas contra o App
+  vendasMap.forEach((itemVen, cleanPed) => {
+    const appMatch = appMap.get(cleanPed);
+
+    if (!appMatch) {
+      results.push({
+        origem: "Vendas",
+        pedido: itemVen.rawPed,
+        data: itemVen.data,
+        cliente: itemVen.cliente || "-",
+        consultor: itemVen.consultor || "-",
+        valor: itemVen.valor,
+        statusInfo: "Não Encontrado no App",
+        _status: "bad",
+        _statusLabel: "Falta no App"
+      });
+    } else {
+      results.push({
+        origem: "Ambos",
+        pedido: itemVen.rawPed,
+        data: itemVen.data,
+        cliente: itemVen.cliente || "-",
+        consultor: itemVen.consultor || "-",
+        valor: itemVen.valor,
+        statusInfo: `${appMatch.statusGeral || "-"} / ${appMatch.statusFin || "-"}`,
+        _status: "ok",
+        _statusLabel: "OK (Presente em Ambos)"
+      });
+    }
+  });
+
+  // B) Checa o que está no App mas NÃO está em Vendas
+  appMap.forEach((itemApp, cleanPed) => {
+    if (!vendasMap.has(cleanPed)) {
+      results.push({
+        origem: "App",
+        pedido: itemApp.rawPed,
+        data: "-",
+        cliente: itemApp.cliente || "-",
+        consultor: itemApp.vendedor || "-",
+        valor: itemApp.valor,
+        statusInfo: `${itemApp.statusGeral || "-"} / ${itemApp.statusFin || "-"}`,
+        _status: "warn",
+        _statusLabel: "Presente no App, mas Falta em Vendas"
+      });
+    }
+  });
+
+  renderResult("result-vendasnoapp", results, [
+    { key: "origem", label: "Origem Registro" },
     { key: "pedido", label: "Nº Pedido" },
-    { key: "statusVendas", label: "Status / Valor (Vendas)" },
-    { key: "statusAppPedido", label: "Status Pedido (App)" },
-    { key: "statusAppFin", label: "Status Financeiro (App)" }
-  ], "Auditoria_Cancelamentos_Vendas_x_App");
+    { key: "data", label: "Data (Vendas)" },
+    { key: "cliente", label: "Cliente" },
+    { key: "consultor", label: "Consultor / Vendedor" },
+    { key: "valor", label: "Valor (R$)", isCurrency: true },
+    { key: "statusInfo", label: "Status no App" }
+  ], "Presenca_Cruzada_Vendas_x_App");
 }
