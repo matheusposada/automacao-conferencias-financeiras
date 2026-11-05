@@ -4,7 +4,8 @@ const fileStore = {
   vendas: null,
   safra: null,
   pix: null,
-  santander: null
+  santander: null,
+  relpedidos: null // NOVO ARQUIVO
 };
 
 // INSTÂNCIAS DOS CALENDÁRIOS FLATPICKR (PERÍODOS)
@@ -333,7 +334,8 @@ function setupCentralUploads() {
     { id: "file-base-vendas", storeKey: "vendas" },
     { id: "file-base-safra", storeKey: "safra" },
     { id: "file-base-pix", storeKey: "pix" },
-    { id: "file-base-santander", storeKey: "santander" }
+    { id: "file-base-santander", storeKey: "santander" },
+    { id: "file-base-relpedidos", storeKey: "relpedidos" } // NOVO INPUT
   ];
 
   inputs.forEach(item => {
@@ -570,13 +572,24 @@ document.querySelectorAll(".btn-executar").forEach(btn => {
         break;
 
       case "cancelamentos":
-        if (!fileStore.app || !fileStore.vendas) return alert("Por favor, carregue as planilhas do App e de Vendas no topo.");
+        if (!fileStore.relpedidos || !fileStore.vendas) {
+          return alert("Por favor, carregue o Relatório de Pedidos e a planilha de Vendas no topo.");
+        }
         await rodarCancelamentos();
         break;
 
       case "vendasnoapp":
-        if (!fileStore.app || !fileStore.vendas) return alert("Por favor, carregue as planilhas do App e de Vendas no topo.");
+        if (!fileStore.relpedidos || !fileStore.vendas) {
+          return alert("Por favor, carregue as planilhas de Vendas e o novo Relatório de Pedidos no topo.");
+        }
         await rodarVendasNoApp();
+        break;
+
+        case "statusfinanceiro":
+        if (!fileStore.relpedidos || !fileStore.vendas) {
+          return alert("Por favor, carregue o Relatório de Pedidos e a planilha de Vendas no topo.");
+        }
+        await rodarStatusFinanceiro();
         break;
     }
   });
@@ -2202,51 +2215,56 @@ async function rodarAnaliseIndicadores() {
   });
 }
 
-// 10. AUDITORIA DE CANCELAMENTOS (Coluna H de Vendas x Coluna H do App)
+// 10. AUDITORIA DE CANCELAMENTOS (Vendas x Relatório de Pedidos)
 async function rodarCancelamentos() {
-  const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
+  const rowsRel = await parseFileToRows(fileStore.relpedidos);
   const rowsVendas = await parseFileToRows(fileStore.vendas);
 
-  if (!rowsApp || !rowsVendas) return alert("Erro ao carregar arquivos para auditoria.");
+  if (!rowsRel || !rowsVendas) {
+    return alert("Por favor, carregue o Relatório de Pedidos e a planilha de Vendas no topo.");
+  }
 
+  // Mapeamento de colunas no Relatório de Pedidos
+  const idxRel = findHeaderAndIndexes(rowsRel, {
+    pedido: ["nº pedido", "pedido", "id"],
+    status: ["status"],
+    valor: ["total a pagar", "valor total", "valor"]
+  });
+
+  // Mapeamento de colunas em Vendas
   const idxVen = findHeaderAndIndexes(rowsVendas, {
     pedido: ["id pedido", "nº pedido", "pedido", "número do comprovante de vendas (cv)"],
     valor: ["valor", "valor liquido", "valor total da venda"],
-    status: ["status da transação", "status"] // Coluna H de Vendas
+    status: ["status da transação", "status"]
   });
 
-  const idxApp = findHeaderAndIndexes(rowsApp, {
-    pedido: ["número", "nº pedido", "pedido", "id"],
-    statusGeral: ["status"] // Coluna H do App
-  });
+  const colPedRel = idxRel.indexes.pedido ?? 0;
+  const colStRel = idxRel.indexes.status ?? 1;
+  const colValRel = idxRel.indexes.valor ?? 7;
 
   const colPedVen = idxVen.indexes.pedido ?? 9;
   const colValVen = idxVen.indexes.valor ?? 8;
-  const colStVen = idxVen.indexes.status ?? 7; // Coluna H
+  const colStVen = idxVen.indexes.status ?? 7;
 
-  const colPedApp = idxApp.indexes.pedido ?? 0;
-  const colStGeralApp = idxApp.indexes.statusGeral ?? 7; // Coluna H
-
-  // 1. Mapeia a Coluna H do App ("Status")
-  const appMap = new Map();
-  for (let i = idxApp.headerRowIdx + 1; i < rowsApp.length; i++) {
-    const r = rowsApp[i];
-    const rawPed = normKey(r[colPedApp]);
+  // 1. Mapeia Relatório de Pedidos
+  const relMap = new Map();
+  for (let i = idxRel.headerRowIdx + 1; i < rowsRel.length; i++) {
+    const r = rowsRel[i];
+    const rawPed = normKey(r[colPedRel]);
     const cleanPed = normPedido(rawPed);
 
-    if (cleanPed && !appMap.has(cleanPed)) {
-      const stGeral = normKey(r[colStGeralApp]); // Coluna H
-      const stGeralClean = sanitizeText(stGeral);
-
-      appMap.set(cleanPed, {
+    if (cleanPed && !relMap.has(cleanPed)) {
+      const stRel = normKey(r[colStRel]);
+      relMap.set(cleanPed, {
         rawPed: rawPed,
-        statusColH: stGeral,
-        isCancelado: stGeralClean.includes("cancelad")
+        statusGeral: stRel,
+        valor: toNumber(r[colValRel]) ?? 0,
+        isCancelado: sanitizeText(stRel).includes("cancelad")
       });
     }
   }
 
-  // 2. Mapeia a Coluna H de Vendas ("STATUS")
+  // 2. Mapeia Vendas
   const vendasMap = new Map();
   for (let i = idxVen.headerRowIdx + 1; i < rowsVendas.length; i++) {
     const r = rowsVendas[i];
@@ -2256,90 +2274,93 @@ async function rodarCancelamentos() {
     if (!cleanPed || cleanPed === "0" || cleanPed === "manual") continue;
 
     const valVendas = toNumber(r[colValVen]) ?? 0;
-    const stVendas = normKey(r[colStVen]); // Coluna H
-    const stVendasClean = sanitizeText(stVendas);
+    const stVendas = normKey(r[colStVen]);
 
     vendasMap.set(cleanPed, {
       rawPed: rawPed,
-      statusColH: stVendas,
+      status: stVendas,
       valor: valVendas,
-      isCancelado: stVendasClean.includes("cancelad") || stVendasClean.includes("estornad")
+      isCancelado: sanitizeText(stVendas).includes("cancelad") || sanitizeText(stVendas).includes("estornad")
     });
   }
 
   const results = [];
   const processados = new Set();
 
-  // A) Varredura a partir da Coluna H de Vendas
+  // A) Varredura a partir de VENDAS
   vendasMap.forEach((venda, cleanPed) => {
     processados.add(cleanPed);
-    const appMatch = appMap.get(cleanPed);
-    const isAppCancelado = appMatch ? appMatch.isCancelado : false;
+    const relMatch = relMap.get(cleanPed);
+    const isRelCancelado = relMatch ? relMatch.isCancelado : false;
 
-    let isDivergente = false;
-    let label = "";
+    // Avalia se pelo menos um dos lados possui indicação de cancelamento
+    if (venda.isCancelado || isRelCancelado) {
+      let statusClass = "ok";
+      let label = "OK (Cancelado em Ambos)";
 
-    if (venda.isCancelado && !isAppCancelado) {
-      isDivergente = true;
-      label = appMatch 
-        ? `Divergente: Cancelado em Vendas (${venda.statusColH}) e Ativo no App (${appMatch.statusColH})` 
-        : "Divergente: Cancelado em Vendas e Não Encontrado no App";
-    } else if (!venda.isCancelado && isAppCancelado) {
-      isDivergente = true;
-      label = `Divergente: Ativo em Vendas (${venda.statusColH}) e Cancelado no App (${appMatch.statusColH})`;
-    }
+      if (venda.isCancelado && !isRelCancelado) {
+        statusClass = "bad";
+        label = relMatch 
+          ? `Divergente: Cancelado em Vendas (${venda.status}) e Ativo no Relatório (${relMatch.statusGeral})` 
+          : "Divergente: Cancelado em Vendas e Não Encontrado no Relatório";
+      } else if (!venda.isCancelado && isRelCancelado) {
+        statusClass = "bad";
+        label = `Divergente: Ativo em Vendas (${venda.status}) e Cancelado no Relatório (${relMatch.statusGeral})`;
+      }
 
-    if (isDivergente) {
       results.push({
         pedido: venda.rawPed,
-        statusVendas: `${venda.statusColH || "N/A"} (${formatBRL(venda.valor)})`,
-        statusAppPedido: appMatch ? (appMatch.statusColH || "-") : "Não Encontrado",
-        _status: "bad",
+        statusVendas: `${venda.status || "N/A"} (${formatBRL(venda.valor)})`,
+        statusRelatorio: relMatch ? `${relMatch.statusGeral} (${formatBRL(relMatch.valor)})` : "Não Encontrado",
+        _status: statusClass,
         _statusLabel: label
       });
     }
   });
 
-  // B) Varredura dos pedidos no App que estão cancelados mas não existem em Vendas
-  appMap.forEach((appItem, cleanPed) => {
+  // B) Varredura de pedidos cancelados no Relatório e não encontrados em Vendas
+  relMap.forEach((relItem, cleanPed) => {
     if (processados.has(cleanPed)) return;
 
-    if (appItem.isCancelado) {
+    if (relItem.isCancelado) {
       results.push({
-        pedido: appItem.rawPed,
+        pedido: relItem.rawPed,
         statusVendas: "Não Encontrado em Vendas",
-        statusAppPedido: appItem.statusColH || "-",
+        statusRelatorio: `${relItem.statusGeral} (${formatBRL(relItem.valor)})`,
         _status: "bad",
-        _statusLabel: "Divergente: Cancelado na Coluna H do App e Não Encontrado em Vendas"
+        _statusLabel: "Divergente: Cancelado no Relatório de Pedidos e Não Encontrado em Vendas"
       });
     }
   });
 
   renderResult("result-cancelamentos", results, [
     { key: "pedido", label: "Nº Pedido" },
-    { key: "statusVendas", label: "Status / Valor (Vendas - Coluna H)" },
-    { key: "statusAppPedido", label: "Status Pedido (App - Coluna H)" }
-  ], "Auditoria_Cancelamentos_ColH_Vendas_x_App");
+    { key: "statusVendas", label: "Status / Valor (Vendas)" },
+    { key: "statusRelatorio", label: "Status / Valor (Relatório de Pedidos)" }
+  ], "Auditoria_Cancelamentos_Vendas_x_Relatorio");
 }
 
-// 11. PRESENÇA DE PEDIDOS (Cruzamento Bidirecional: Vendas x App)
+// 11. PRESENÇA DE PEDIDOS (Cruzamento Bidirecional: Vendas x Relatório de Pedidos)
 async function rodarVendasNoApp() {
-  const rowsApp = await parseFileToRows(fileStore.app, "Pedidos");
+  const rowsRel = await parseFileToRows(fileStore.relpedidos);
   const rowsVendas = await parseFileToRows(fileStore.vendas);
 
-  if (!rowsApp || !rowsVendas) {
-    return alert("Por favor, carregue as planilhas do App e de Vendas no topo.");
+  if (!rowsRel || !rowsVendas) {
+    return alert("Por favor, carregue as planilhas de Vendas e o Relatório de Pedidos no topo.");
   }
 
-  const idxApp = findHeaderAndIndexes(rowsApp, {
-    pedido: ["número", "nº pedido", "pedido", "id"],
-    cliente: ["cliente", "nome"],
-    vendedor: ["vendedor (omie)", "vendedor", "consultor"],
-    valor: ["valor total do pedido (r$)", "valor total a pagar", "valor"],
+  // Identificação automática de colunas no novo Relatório de Pedidos
+  const idxRel = findHeaderAndIndexes(rowsRel, {
+    pedido: ["nº pedido", "pedido", "id"],
     statusGeral: ["status"],
-    statusFin: ["status financeiro", "status fin"]
+    statusFin: ["status financeiro", "status fin"],
+    data: ["data do pedido", "data"],
+    vendedor: ["vendedor", "consultor"],
+    cliente: ["cliente", "nome"],
+    valor: ["total a pagar", "valor total", "valor"]
   });
 
+  // Identificação de colunas na planilha de Vendas
   const idxVen = findHeaderAndIndexes(rowsVendas, {
     pedido: ["id pedido", "nº pedido", "pedido", "número do comprovante de vendas (cv)"],
     cliente: ["cliente", "clientes", "nome", "razão social"],
@@ -2348,12 +2369,13 @@ async function rodarVendasNoApp() {
     data: ["data/hora da venda", "data"]
   });
 
-  const colPedApp = idxApp.indexes.pedido ?? 0;
-  const colCliApp = idxApp.indexes.cliente ?? 9;
-  const colVendApp = idxApp.indexes.vendedor ?? 11;
-  const colValApp = idxApp.indexes.valor ?? 39;
-  const colStGeralApp = idxApp.indexes.statusGeral ?? 7;
-  const colStFinApp = idxApp.indexes.statusFin ?? 8;
+  const colPedRel = idxRel.indexes.pedido ?? 0;
+  const colStGeralRel = idxRel.indexes.statusGeral ?? 1;
+  const colStFinRel = idxRel.indexes.statusFin ?? 2;
+  const colDtRel = idxRel.indexes.data ?? 3;
+  const colVendRel = idxRel.indexes.vendedor ?? 4;
+  const colCliRel = idxRel.indexes.cliente ?? 5;
+  const colValRel = idxRel.indexes.valor ?? 7;
 
   const colPedVen = idxVen.indexes.pedido ?? 9;
   const colCliVen = idxVen.indexes.cliente ?? 2;
@@ -2361,26 +2383,28 @@ async function rodarVendasNoApp() {
   const colValVen = idxVen.indexes.valor ?? 8;
   const colDataVen = idxVen.indexes.data ?? 0;
 
-  // 1. Mapeia todos os pedidos da planilha do App
-  const appMap = new Map();
-  for (let i = idxApp.headerRowIdx + 1; i < rowsApp.length; i++) {
-    const r = rowsApp[i];
-    const rawPed = normKey(r[colPedApp]);
+  // 1. Mapeia o Relatório de Pedidos
+  const relMap = new Map();
+  for (let i = idxRel.headerRowIdx + 1; i < rowsRel.length; i++) {
+    const r = rowsRel[i];
+    const rawPed = normKey(r[colPedRel]);
     const cleanPed = normPedido(rawPed);
 
-    if (cleanPed && !appMap.has(cleanPed)) {
-      appMap.set(cleanPed, {
+    if (cleanPed && !relMap.has(cleanPed)) {
+      const dtParsed = formatToBRDate(r[colDtRel]);
+      relMap.set(cleanPed, {
         rawPed: rawPed,
-        cliente: normKey(r[colCliApp]),
-        vendedor: normKey(r[colVendApp]),
-        valor: toNumber(r[colValApp]),
-        statusGeral: normKey(r[colStGeralApp]),
-        statusFin: normKey(r[colStFinApp])
+        statusGeral: normKey(r[colStGeralRel]),
+        statusFin: normKey(r[colStFinRel]),
+        data: dtParsed ? dtParsed.str : "-",
+        vendedor: normKey(r[colVendRel]),
+        cliente: normKey(r[colCliRel]),
+        valor: toNumber(r[colValRel])
       });
     }
   }
 
-  // 2. Mapeia todos os pedidos da planilha de Vendas
+  // 2. Mapeia a planilha de Vendas
   const vendasMap = new Map();
   for (let i = idxVen.headerRowIdx + 1; i < rowsVendas.length; i++) {
     const r = rowsVendas[i];
@@ -2404,11 +2428,11 @@ async function rodarVendasNoApp() {
 
   const results = [];
 
-  // A) Checa tudo que está em Vendas contra o App
+  // A) Checa tudo que está em Vendas contra o Relatório de Pedidos
   vendasMap.forEach((itemVen, cleanPed) => {
-    const appMatch = appMap.get(cleanPed);
+    const relMatch = relMap.get(cleanPed);
 
-    if (!appMatch) {
+    if (!relMatch) {
       results.push({
         origem: "Vendas",
         pedido: itemVen.rawPed,
@@ -2416,9 +2440,9 @@ async function rodarVendasNoApp() {
         cliente: itemVen.cliente || "-",
         consultor: itemVen.consultor || "-",
         valor: itemVen.valor,
-        statusInfo: "Não Encontrado no App",
+        statusInfo: "Não Encontrado no Relatório",
         _status: "bad",
-        _statusLabel: "Falta no App"
+        _statusLabel: "Falta no Relatório de Pedidos"
       });
     } else {
       results.push({
@@ -2428,26 +2452,26 @@ async function rodarVendasNoApp() {
         cliente: itemVen.cliente || "-",
         consultor: itemVen.consultor || "-",
         valor: itemVen.valor,
-        statusInfo: `${appMatch.statusGeral || "-"} / ${appMatch.statusFin || "-"}`,
+        statusInfo: `${relMatch.statusGeral || "-"} / ${relMatch.statusFin || "-"}`,
         _status: "ok",
         _statusLabel: "OK (Presente em Ambos)"
       });
     }
   });
 
-  // B) Checa o que está no App mas NÃO está em Vendas
-  appMap.forEach((itemApp, cleanPed) => {
+  // B) Checa o que está no Relatório de Pedidos mas NÃO está em Vendas
+  relMap.forEach((itemRel, cleanPed) => {
     if (!vendasMap.has(cleanPed)) {
       results.push({
-        origem: "App",
-        pedido: itemApp.rawPed,
-        data: "-",
-        cliente: itemApp.cliente || "-",
-        consultor: itemApp.vendedor || "-",
-        valor: itemApp.valor,
-        statusInfo: `${itemApp.statusGeral || "-"} / ${itemApp.statusFin || "-"}`,
+        origem: "Relatório de Pedidos",
+        pedido: itemRel.rawPed,
+        data: itemRel.data || "-",
+        cliente: itemRel.cliente || "-",
+        consultor: itemRel.vendedor || "-",
+        valor: itemRel.valor,
+        statusInfo: `${itemRel.statusGeral || "-"} / ${itemRel.statusFin || "-"}`,
         _status: "warn",
-        _statusLabel: "Presente no App, mas Falta em Vendas"
+        _statusLabel: "Presente no Relatório, mas Falta em Vendas"
       });
     }
   });
@@ -2455,10 +2479,160 @@ async function rodarVendasNoApp() {
   renderResult("result-vendasnoapp", results, [
     { key: "origem", label: "Origem Registro" },
     { key: "pedido", label: "Nº Pedido" },
-    { key: "data", label: "Data (Vendas)" },
+    { key: "data", label: "Data Pedido" },
     { key: "cliente", label: "Cliente" },
     { key: "consultor", label: "Consultor / Vendedor" },
     { key: "valor", label: "Valor (R$)", isCurrency: true },
-    { key: "statusInfo", label: "Status no App" }
-  ], "Presenca_Cruzada_Vendas_x_App");
+    { key: "statusInfo", label: "Status no Relatório (Geral / Fin.)" }
+  ], "Presenca_Cruzada_Vendas_x_RelatorioPedidos");
+}
+
+// 12. CONFERÊNCIA DE STATUS FINANCEIRO (Vendas x Relatório de Pedidos - Regras Atualizadas)
+async function rodarStatusFinanceiro() {
+  const rowsRel = await parseFileToRows(fileStore.relpedidos);
+  const rowsVendas = await parseFileToRows(fileStore.vendas);
+
+  if (!rowsRel || !rowsVendas) {
+    return alert("Por favor, carregue o Relatório de Pedidos e a planilha de Vendas no topo.");
+  }
+
+  // Mapeia colunas do Relatório de Pedidos
+  const idxRel = findHeaderAndIndexes(rowsRel, {
+    pedido: ["nº pedido", "pedido", "id"],
+    statusFin: ["status financeiro", "status fin"] // Coluna C
+  });
+
+  // Mapeia colunas de Vendas
+  const idxVen = findHeaderAndIndexes(rowsVendas, {
+    pedido: ["id pedido", "nº pedido", "pedido", "número do comprovante de vendas (cv)"],
+    formaPgto: ["forma de pagamento", "forma pgto", "pagamento"], // Coluna G
+    status: ["status da transação", "status"] // Coluna H
+  });
+
+  const colPedRel = idxRel.indexes.pedido ?? 0;
+  const colStFinRel = idxRel.indexes.statusFin ?? 2; // Coluna C
+
+  const colPedVen = idxVen.indexes.pedido ?? 9;
+  const colFormaVen = idxVen.indexes.formaPgto ?? 6; // Coluna G
+  const colStVen = idxVen.indexes.status ?? 7; // Coluna H
+
+  // 1. Mapeia o Relatório de Pedidos por código do pedido
+  const relMap = new Map();
+  for (let i = idxRel.headerRowIdx + 1; i < rowsRel.length; i++) {
+    const r = rowsRel[i];
+    const rawPed = normKey(r[colPedRel]);
+    const cleanPed = normPedido(rawPed);
+
+    if (cleanPed && !relMap.has(cleanPed)) {
+      relMap.set(cleanPed, {
+        rawPed: rawPed,
+        statusFin: normKey(r[colStFinRel])
+      });
+    }
+  }
+
+  // Métodos de pagamento do Grupo 1
+  const grupo1Formas = ["link cartao", "pix", "pix+boleto", "pix+cartao", "cartao+boleto", "pix+link+boleto"];
+  
+  // Status do relatório aceitos para pagamentos concluídos / liquidados / faturados
+  const statusOkConcluidos = [
+    "pagamento confirmado", 
+    "pagamento_confirmado", 
+    "faturado", 
+    "em_faturamento", 
+    "em faturamento", 
+    "aguardando_cadastro", 
+    "aguardando cadastro"
+  ];
+
+  const results = [];
+
+  // 2. Varredura da planilha de Vendas aplicando as regras
+  for (let i = idxVen.headerRowIdx + 1; i < rowsVendas.length; i++) {
+    const r = rowsVendas[i];
+    const rawPed = normKey(r[colPedVen]);
+    const cleanPed = normPedido(rawPed);
+
+    if (!cleanPed || cleanPed === "0" || cleanPed === "manual") continue;
+
+    const formaPgto = normKey(r[colFormaVen]);
+    const stVendas = normKey(r[colStVen]);
+    const formaClean = sanitizeText(formaPgto);
+    const stVendasClean = sanitizeText(stVendas);
+
+    const relMatch = relMap.get(cleanPed);
+
+    if (!relMatch) {
+      results.push({
+        pedido: rawPed,
+        formaPgto: formaPgto || "-",
+        statusVendas: stVendas || "-",
+        statusFinRel: "Não Encontrado no Relatório",
+        _status: "warn",
+        _statusLabel: "Pedido não localizado no Relatório de Pedidos"
+      });
+      continue;
+    }
+
+    const stFinRel = relMatch.statusFin;
+    const stFinRelClean = sanitizeText(stFinRel);
+
+    let isValido = false;
+    let regraDesc = "";
+
+    // Validação se o status em Vendas é um dos estados concluídos
+    const isVendasConcluido = ["pgto confirmado", "pagamento confirmado", "confirmado", "finalizado", "credito", "crédito"].includes(stVendasClean);
+
+    // REGRA 1: Link cartão, Pix, Pix+Boleto, Pix+Cartão, Cartão+Boleto, Pix+Link+Boleto
+    const isGrupo1 = grupo1Formas.includes(formaClean) || 
+                     (formaClean.includes("link") || formaClean.includes("pix") || formaClean.includes("cartao"));
+
+    if (isGrupo1 && !formaClean.includes("bonifica")) {
+      if (["gerado", "pendente", "unificar"].includes(stVendasClean)) {
+        regraDesc = "Grupo 1: Gerado/Pendente/Unificar → Verificado";
+        if (["verificado"].includes(stFinRelClean)) {
+          isValido = true;
+        }
+      } else if (isVendasConcluido) {
+        regraDesc = "Grupo 1: Concluído → Confirmado / Faturado / Em Faturamento / Aguardando Cadastro";
+        if (statusOkConcluidos.includes(stFinRelClean)) {
+          isValido = true;
+        }
+      } else {
+        regraDesc = `Grupo 1 com Status inesperado em Vendas (${stVendas})`;
+      }
+    }
+    // REGRA 2: Boleto
+    else if (formaClean.includes("boleto")) {
+      regraDesc = "Boleto: Finalizado / Concluído → Confirmado / Faturado / Em Faturamento / Aguardando Cadastro";
+      if ((["finalizado"].includes(stVendasClean) || isVendasConcluido) && statusOkConcluidos.includes(stFinRelClean)) {
+        isValido = true;
+      }
+    }
+    // REGRA 3: Bonificado
+    else if (formaClean.includes("bonifica")) {
+      regraDesc = "Bonificado: Crédito / Concluído → Confirmado / Faturado / Em Faturamento / Aguardando Cadastro";
+      if ((["credito", "crédito"].includes(stVendasClean) || isVendasConcluido) && statusOkConcluidos.includes(stFinRelClean)) {
+        isValido = true;
+      }
+    } else {
+      regraDesc = `Forma de pagamento não mapeada (${formaPgto})`;
+    }
+
+    results.push({
+      pedido: rawPed,
+      formaPgto: formaPgto || "-",
+      statusVendas: stVendas || "-",
+      statusFinRel: stFinRel || "-",
+      _status: isValido ? "ok" : "bad",
+      _statusLabel: isValido ? "OK" : `Divergente (${regraDesc})`
+    });
+  }
+
+  renderResult("result-statusfinanceiro", results, [
+    { key: "pedido", label: "Nº Pedido" },
+    { key: "formaPgto", label: "Forma de Pagamento (Vendas - Col G)" },
+    { key: "statusVendas", label: "Status (Vendas - Col H)" },
+    { key: "statusFinRel", label: "Status Financeiro (Relatório - Col C)" }
+  ], "Conferencia_Status_Financeiro_Vendas_x_Relatorio");
 }

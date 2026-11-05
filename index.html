@@ -33,9 +33,18 @@
         </label>
       </div>
 
+      <!-- Upload Relatório de Pedidos (Novo) -->
+      <div style="flex: 1; min-width: 200px;">
+        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">2. Relatório de Pedidos (.xlsx):</label>
+        <label class="drop">
+          <input type="file" id="file-base-relpedidos" accept=".xlsx,.xls,.csv">
+          <span>Clique ou arraste o Relatório de Pedidos aqui</span>
+        </label>
+      </div>
+
       <!-- Upload Vendas -->
       <div style="flex: 1; min-width: 200px;">
-        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">2. Planilha de Vendas:</label>
+        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">3. Planilha de Vendas:</label>
         <label class="drop">
           <input type="file" id="file-base-vendas" accept=".xlsx,.xls,.csv">
           <span>Clique ou arraste o arquivo de Vendas aqui</span>
@@ -44,7 +53,7 @@
 
       <!-- Upload Safra -->
       <div style="flex: 1; min-width: 200px;">
-        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">3. Extrato Safra (.csv):</label>
+        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">4. Extrato Safra (.csv):</label>
         <label class="drop">
           <input type="file" id="file-base-safra" accept=".csv,.xlsx,.xls">
           <span>Clique ou arraste o extrato Safra aqui</span>
@@ -53,7 +62,7 @@
 
       <!-- Upload Pix -->
       <div style="flex: 1; min-width: 200px;">
-        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">4. Extrato Pix (.xlsx):</label>
+        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">5. Extrato Pix (.xlsx):</label>
         <label class="drop">
           <input type="file" id="file-base-pix" accept=".xlsx,.xls,.csv">
           <span>Clique ou arraste a planilha Pix aqui</span>
@@ -62,7 +71,7 @@
 
       <!-- Upload Santander -->
       <div style="flex: 1; min-width: 200px;">
-        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">5. Extrato Santander (.xlsx):</label>
+        <label style="font-weight: 600; font-size: 12.5px; display: block; margin-bottom: 6px;">6. Extrato Santander (.xlsx):</label>
         <label class="drop">
           <input type="file" id="file-base-santander" accept=".xlsx,.xls,.csv">
           <span>Clique ou arraste a planilha Santander aqui</span>
@@ -87,6 +96,7 @@
     <div class="tab" data-tab="indicadores">9 · Indicadores Financeiros</div>
     <div class="tab" data-tab="cancelamentos">10 · Cancelamentos (Vendas × App)</div>
     <div class="tab" data-tab="vendasnoapp">11 · Vendas no App (Vendas × App)</div>
+    <div class="tab" data-tab="statusfinanceiro">12 · Status Financeiro (Vendas × Relatório)</div>
   </div>
 
   <!-- TAB 1: DUPLICIDADES NSU -->
@@ -184,24 +194,21 @@
   <!-- TAB 9: INDICADORES FINANCEIROS -->
   <div class="panel" id="panel-indicadores">
     <div class="card">
-      <h2>Análise de Indicadores Financeiros</h2>
-      <p class="desc">Métricas completas baseadas nas colunas reais da planilha do App (Status, SLA em Horas, Evolução Diária e Comparativo Semanal).</p>
-      
-      <!-- Filtros com Calendários Range -->
+      <h2>Análise de Indicadores Financeiros (Relatório Semanal)</h2>
+      <p class="desc">Gera o relatório semanal do financeiro a partir da planilha <b>financeiro-conferencia</b> (App): status no fechamento, pedidos por dia, tempos de envio do link e de confirmação, matrizes, sábado, SLA de pagamento e comparativo. Com o <b>Relatório de Pedidos</b> carregado, inclui também <b>Cancelamentos</b> (com "Cancelado por") e a <b>Masterclass</b>.</p>
+
       <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e2e8f0;">
-        <h3 style="font-size: 14px; margin-bottom: 12px; color: #2d3748;">📅 Períodos de Análise (Data de Chegada na Coluna E)</h3>
-        
+        <h3 style="font-size: 14px; margin-bottom: 12px; color: #2d3748;">📅 Períodos de Análise (Data de entrada no financeiro = "Data Financeiro Aguardando")</h3>
+
         <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-          <!-- Semana Atual / Período Principal -->
           <div style="flex: 1; min-width: 280px;">
-            <label style="font-weight: 600; font-size: 12px; display: block; margin-bottom: 6px; color: #4a5568;">Semana Atual / Período Principal:</label>
+            <label style="font-weight: 600; font-size: 12px; display: block; margin-bottom: 6px; color: #4a5568;">Semana Atual (ex.: 26/10 a 31/10):</label>
             <div style="display: flex; gap: 8px; align-items: center;">
               <input type="text" id="ind-periodo-principal" placeholder="Selecione a semana atual..." style="padding: 8px 12px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 13px; width: 100%; background: #fff; cursor: pointer;">
               <button type="button" id="btn-limpar-ind-principal" style="padding: 8px 10px; background: #edf2f7; border: 1px solid #cbd5e0; border-radius: 4px; cursor: pointer; font-size: 11px;">Clear</button>
             </div>
           </div>
 
-          <!-- Semana Anterior (Opcional) -->
           <div style="flex: 1; min-width: 280px;">
             <label style="font-weight: 600; font-size: 12px; display: block; margin-bottom: 6px; color: #4a5568;">Semana Anterior para Comparativo (Opcional):</label>
             <div style="display: flex; gap: 8px; align-items: center;">
@@ -209,6 +216,11 @@
               <button type="button" id="btn-limpar-ind-comp" style="padding: 8px 10px; background: #edf2f7; border: 1px solid #cbd5e0; border-radius: 4px; cursor: pointer; font-size: 11px;">Clear</button>
             </div>
           </div>
+        </div>
+
+        <div style="margin-top: 14px;">
+          <label style="font-weight: 600; font-size: 12px; display: block; margin-bottom: 6px; color: #4a5568;">Masterclasses da semana (requer Relatório de Pedidos). Separe com ";" e, se quiser marcar o dia do evento, use "nome | dd/mm/aaaa":</label>
+          <input type="text" id="ind-evento" value="4 Pilares | 27/10/2026" placeholder="Ex.: 4 Pilares | 27/10/2026 ; Testosterona | 28/10/2026" style="padding: 8px 12px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 13px; width: 100%; background: #fff;">
         </div>
       </div>
 
@@ -227,16 +239,45 @@
     <div class="card" id="result-cancelamentos" style="display:none;"></div>
   </div>
 
-  <!-- TAB 11: PRESENÇA DE VENDAS NO APP -->
+  <!-- TAB 11: PRESENÇA DE VENDAS NO RELATÓRIO DE PEDIDOS -->
   <div class="panel" id="panel-vendasnoapp">
     <div class="card">
-      <h2>Verificar Presença de Vendas no App</h2>
-      <p class="desc">Verifica se todos os pedidos registrados na planilha de <b>Vendas</b> constam na planilha extraída do <b>App</b>.</p>
-      <button class="btn-export btn-executar" data-analise="vendasnoapp" style="width: 100%; padding: 10px;">▶ Rodar Verificação de Vendas no App</button>
+      <h2>Verificar Presença de Vendas no Relatório de Pedidos</h2>
+      <p class="desc">Cruza a planilha de <b>Vendas</b> contra o novo <b>Relatório de Pedidos</b> para identificar pedidos faltantes de ambos os lados.</p>
+      <button class="btn-export btn-executar" data-analise="vendasnoapp" style="width: 100%; padding: 10px;">▶ Rodar Verificação de Pedidos</button>
     </div>
     <div class="card" id="result-vendasnoapp" style="display:none;"></div>
   </div>
 
-  <script src="script.js"></script>
+  <!-- TAB 12: STATUS FINANCEIRO DO PEDIDO -->
+  <div class="panel" id="panel-statusfinanceiro">
+    <div class="card">
+      <h2>Conferir Status Financeiro do Pedido</h2>
+      <p class="desc">Valida se a combinação de <b>Forma de Pagamento (Col G)</b> e <b>Status (Col H)</b> da planilha de Vendas corresponde corretamente ao <b>Status Financeiro (Col C)</b> do Relatório de Pedidos.</p>
+      <button class="btn-export btn-executar" data-analise="statusfinanceiro" style="width: 100%; padding: 10px;">▶ Rodar Conferência de Status Financeiro</button>
+    </div>
+    <div class="card" id="result-statusfinanceiro" style="display:none;"></div>
+  </div>
+
+  <!-- Núcleo (estado, utilitários, interface, roteador) -->
+  <script src="js/core/state.js"></script>
+  <script src="js/core/utils.js"></script>
+  <script src="js/core/ui.js"></script>
+  <script src="js/core/router.js"></script>
+
+  <!-- Análises (uma por arquivo; a 9 tem o motor de cálculo separado da tela) -->
+  <script src="js/analises/01-duplicidades-nsu.js"></script>
+  <script src="js/analises/02-consultores.js"></script>
+  <script src="js/analises/03-datas.js"></script>
+  <script src="js/analises/04-valores.js"></script>
+  <script src="js/analises/05-pagamentos.js"></script>
+  <script src="js/analises/06-data-pagamento.js"></script>
+  <script src="js/analises/07-confirmacao-pagamento.js"></script>
+  <script src="js/analises/08-duplicidades-vendas.js"></script>
+  <script src="js/analises/09-indicadores-motor.js"></script>
+  <script src="js/analises/09-indicadores.js"></script>
+  <script src="js/analises/10-cancelamentos.js"></script>
+  <script src="js/analises/11-vendas-no-app.js"></script>
+  <script src="js/analises/12-status-financeiro.js"></script>
 </body>
 </html>

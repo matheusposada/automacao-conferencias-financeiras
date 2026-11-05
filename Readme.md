@@ -26,7 +26,9 @@ Aplicação web client-side desenvolvida em JavaScript para automação de confe
 Plaintext
 
 ├── index.html       # Estrutura visual, formulários de upload e painéis de navegação
-├── script.js        # Lógica central, algoritmos de normalização e cruzamento de dados
+├── js/
+│   ├── core/        # Núcleo: state.js (arquivos/calendários), utils.js (normalização e leitura), ui.js (abas, uploads, tabela padrão), router.js (botões)
+│   └── analises/    # Uma análise por arquivo (01 a 12); a 9 tem o motor de cálculo em 09-indicadores-motor.js
 └── style.css        # Estilização, temas visuais e formatação das tabelas de auditoria
 
 🔍 Regras de Negócio e Análises Suportadas
@@ -75,6 +77,30 @@ Plaintext
         Reconcilia transações fracionadas e identifica pagamentos parciais (ex: Pagamento Parcial (1/2 NSUs)).
 
         Limpa sufixos decimais e normaliza zeros à esquerda.
+
+9. Indicadores Financeiros (Relatório Semanal)
+
+    Objetivo: Gerar o relatório semanal do financeiro (mesmo formato da apresentação) a partir da planilha financeiro-conferencia.
+
+    Arquivos: App (financeiro-conferencia) obrigatório. Relatório de Pedidos opcional (habilita Cancelamentos com "Cancelado por" e Masterclass).
+
+    Filtros: entrada no financeiro = "Data Financeiro Aguardando". Ficam de fora os status Aprovação gerencial / SAC, Análise de crédito, Crédito reprovado, Efetivado, Orçamento, Rejeitado, Retroativo e Cancelado (cancelados só entram na análise de cancelamentos). Um registro por pedido (recebimentos múltiplos são consolidados).
+
+    Status no fechamento do período: reconstruído pelas datas. Confirmado = tem "Data Financeiro Confirmado" até o fim do período (inclui Aguardando cadastro, Em faturamento e Faturado); Verificado = link enviado, sem confirmação; Pendente = sem verificação.
+
+    Tempos: envio do link = entrada → verificação; confirmação = verificação → confirmação. Pedidos sem verificação (boleto, bonificado e PIX já pago) são confirmados direto e ficam fora das médias do link.
+
+    Matriz de verificação: até 5 min, 5–15, 15–30, 30–60 min, 1–4 h, acima de 4 h (mesmo dia), e depois dias de calendário (24 h, 48 h, 72 h, 96 h).
+
+    Matriz de confirmação: 0–4 h, 4–12, 12–24, 24–48, 48–72 e acima de 72 h, contadas do início do dia de entrada. Pedidos com PIX confirmados direto (já pagos na chegada) entram em 0–4 h.
+
+    Sábado: pedidos que entraram, pagos no próprio sábado (data do NSU = data de entrada) e confirmados, com a média dos sábados anteriores.
+
+    SLA de pagamento: prazo de 5 dias; lista os pedidos em aberto vencidos (por faixa de dias e semana de entrada) e os pagos fora do prazo. Depende de a planilha ter entradas desde o início do período (ideal: desde 01/09).
+
+    Cancelamentos e Masterclass: usam o Relatório de Pedidos (categoria, "Cancelado por", valor; evento pelo nome, ex.: "4 Pilares").
+
+    Saídas: tela, relatório em Markdown (botão de copiar, para o Gamma) e planilha .xlsx (Resumo, Pedidos da semana, SLA, Cancelamentos, Masterclass, Notas).
 
 📋 Como Utilizar
 
